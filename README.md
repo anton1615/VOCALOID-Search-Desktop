@@ -26,8 +26,11 @@ This is a desktop port of the [web-based VOCALOID Search](https://github.com/ant
 - **Multi-language Support**: English, Japanese, Chinese (Traditional)
 - **PiP Window**: Pop out a picture-in-picture player that stays on top
 - **Watch History**: Track videos you've watched
+- **Exclude Watched**: Filter out videos you've already seen from search results
+- **Window State Persistence**: Remember window position, size, and maximize state across sessions
 - **Local Database**: Scrape and store video data locally for fast offline search
 - **Custom Formula Sorting & Filtering**: Weight videos by views, likes, mylists, and comments using your own formula
+- **Auto-Skip**: Automatically skip video endings (useful for bypassing credits or sponsor segments)
 - **Embedded Player**: Continuous playback with the official Niconico embed player
 - **Keyword + Tag Search**: Full-text search with tag filtering
 - **Infinite Scroll**: Dynamic loading instead of fixed pagination
@@ -111,19 +114,47 @@ Database and settings are stored at:
 Windows: %APPDATA%\com.vocaloid-search.desktop
 ```
 
+### Portable Mode
+
+To use portable mode (store data in the application folder), create a `data/` folder in the same directory as the executable:
+```
+<vocaloid-search-desktop.exe location>/data/
+```
+
+When portable mode is active, all data (database, config, thumbnails) is stored in this folder. You can copy the entire folder to another computer and the application will use the same data.
+
+**Note**: Switching between portable and standard mode does NOT automatically migrate data.
+
 ---
 
 ## User Guide
 
 ### Usage Flow
 
-1. **Sync Database**: Open the app and go to **Data Sync** page. Click "Start Sync" to download video data from Niconico. The Niconico Snapshot API updates daily around 5-6 AM JST, so syncing once per day is recommended.
+1. **Startup Check**: When the app starts, it automatically checks if the database is empty or outdated. The Niconico Snapshot API updates daily around 5-6 AM JST. If your database is stale, you'll be prompted to sync.
 
-2. **Search & Browse**: Use the search bar to find videos by keywords. Add tag filters to narrow results. Adjust sorting formula to prioritize views, likes, mylists, or comments.
+2. **Sync Database**: Go to **Data Sync** page to configure and run the scraper:
+   - **Query**: Search keyword (default: `VOCALOID`)
+   - **Max Age**: Only fetch videos from the last N days (default: 365, set to empty for unlimited)
+   - **Targets**: Search in `tags`, `tagsExact`, `title`, `description`, or combinations like `tags,title`
+   - **Category**: Filter by category (default: `MUSIC`)
+   
+   Click "Start Sync" to download video data. Syncing once per day is recommended.
 
-3. **Watch Videos**: Click a video to play it in the embedded player. Videos auto-play continuously from the list.
+3. **Search & Browse**: Use the search bar to find videos by keywords. Add tag filters to narrow results. Adjust sorting formula to prioritize views, likes, mylists, or comments. Enable "Exclude Watched" to hide videos you've already seen.
 
-4. **PiP Mode**: Click the pop-out button to open a Picture-in-Picture window. The PiP window is a simplified player view without navigation, and stays always on top.
+4. **Watch Videos**: Click a video to play it in the embedded player. Videos auto-play continuously from the list. Enable Auto-Skip in playback settings to automatically skip video endings.
+
+5. **PiP Mode**: Click the pop-out button to open a Picture-in-Picture window. The PiP window is a simplified player view without navigation, and stays always on top.
+
+### Scraper Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `query` | `VOCALOID` | Search keyword for Niconico Snapshot API |
+| `max_age_days` | `365` | Only fetch videos newer than N days. Leave empty for unlimited |
+| `targets` | `tags` | Search targets: `tags`, `tagsExact`, `title`, `description`, or combinations |
+| `category_filter` | `MUSIC` | Niconico category filter (MUSIC, GAME, ANIME, ENTERTAINMENT, DANCE, OTHER) |
 
 ---
 
@@ -184,8 +215,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
    - Playback in PiP is not recorded to watch history
    - Playback state is reset when opening/closing PiP
 3. **PiP Window**: Occasionally cannot be closed (unknown cause)
-4. **Region-Locked Videos**: Interrupt auto-play; cannot be marked as watched since they fail to play
-5. **Other Issues**: Many edge cases remain untested
+4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself)
+5. **Region-Locked Videos**: Interrupt auto-play; cannot be marked as watched since they fail to play
+6. **Other Issues**: Many edge cases remain untested
 
 ### Future Plans
 
