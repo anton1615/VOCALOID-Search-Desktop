@@ -191,11 +191,13 @@ npm run tauri dev
 # 同時建置前端和後端
 npm run tauri build
 
-# 或使用 debug 旗標建置（檔案較大但較易診斷問題）
+# 或使用 debug 旗標建置（編譯較快，檔案較大）
 npm run tauri build -- --debug
 ```
 
-> **重要**：Tauri 使用自訂協定（`tauri://localhost`）而非 HTTP localhost 來處理嵌入播放器。這是因為 Niconico 的嵌入播放器會拒絕來自 `localhost` 網域的請求。正式版建置會正確處理這個問題；如果遇到問題，請嘗試使用 `--debug` 旗標。
+> **重要**：Tauri 使用自訂協定（`tauri://localhost`）而非 HTTP localhost 來處理嵌入播放器。這是因為 Niconico 的嵌入播放器會拒絕來自 `localhost` 網域的請求。
+>
+> **開發注意**：由於 Niconico 拒絕 localhost 連線，無法使用 `tauri dev` 測試嵌入式播放器。前端修改後必須重新編譯整個應用程式才能測試。使用 `--debug` 可以跳過 Rust 優化加快編譯速度，讓開發迭代更順暢。正式發布請使用無 `--debug` 的 release build。
 
 建置完成的執行檔位置：
 ```
@@ -228,7 +230,10 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 4. **快捷鍵控制**：加入全域快捷鍵控制播放元件（播放/暫停、上/下一首、音量等）
 5. **以瀏覽器開啟**：與嵌入式播放器互動以用預設瀏覽器開啟連結，或在 PiP 視窗中加入按鈕快速以預設瀏覽器開啟當前影片的 Niconico 原始頁面
 6. **全局音量控制**：加入應用程式層級的音量控制，獨立於嵌入式播放器之外
-7. **Linux 支援**：利用 Tauri 的跨平台能力開發原生 Linux 版本
+7. **資料庫容量顯示**：在同步頁面顯示目前資料庫的容量大小
+8. **可點擊標籤**：點擊標籤可直接加入搜尋框作為搜尋條件
+9. **標題與作者連結**：嵌入式播放器上方的標題和作者名字加入超連結，可由預設瀏覽器開啟各自的 Niconico 原始頁面
+10. **Linux 支援**：利用 Tauri 的跨平台能力開發原生 Linux 版本
 
 ---
 

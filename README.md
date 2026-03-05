@@ -191,11 +191,13 @@ This runs the frontend dev server and Tauri in development mode.
 # Build frontend and backend together
 npm run tauri build
 
-# OR build with debug flag (larger binary but better diagnostics)
+# OR build with debug flag (faster build, larger binary)
 npm run tauri build -- --debug
 ```
 
-> **Important**: Tauri uses a custom protocol (`tauri://localhost`) instead of HTTP localhost for the embed player. This is required because Niconico's embed player rejects requests from `localhost` domains. The production build properly handles this; if you encounter issues, try the `--debug` flag.
+> **Important**: Tauri uses a custom protocol (`tauri://localhost`) instead of HTTP localhost for the embed player. This is required because Niconico's embed player rejects requests from `localhost` domains.
+>
+> **Development Note**: Since Niconico rejects localhost connections, `tauri dev` cannot be used for testing the embedded player. You must rebuild the entire application to test frontend changes. Using `--debug` significantly speeds up the build by skipping Rust optimizations, making the development iteration faster. Use release build (without `--debug`) for final distribution.
 
 The built executable will be at:
 ```
@@ -228,7 +230,10 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 4. **Keyboard Shortcuts**: Add global keyboard shortcuts for playback controls (play/pause, next/previous, volume)
 5. **Open in Browser**: Interact with embedded player to open links in default browser, or add a button in PiP window to quickly open the current video's Niconico page
 6. **Global Volume Control**: Add application-wide volume control independent of the embedded player
-7. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
+7. **Database Size Display**: Show current database size on the sync page
+8. **Clickable Tags**: Allow clicking tags to add them to the search box as search conditions
+9. **Title & Author Links**: Make video title and author name above the embedded player clickable to open their respective Niconico pages in default browser
+10. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
 
 ---
 
