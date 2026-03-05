@@ -226,7 +226,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 2. **Custom Playlists**: User-defined video collections
 3. **Improved State Sync**: Better synchronization between main window and PiP
 4. **Keyboard Shortcuts**: Add global keyboard shortcuts for playback controls (play/pause, next/previous, volume)
-5. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
+5. **Open in Browser**: Interact with embedded player to open links in default browser, or add a button in PiP window to quickly open the current video's Niconico page
+6. **Global Volume Control**: Add application-wide volume control independent of the embedded player
+7. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
 
 ---
 
