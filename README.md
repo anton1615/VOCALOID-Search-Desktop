@@ -217,14 +217,16 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 3. **PiP Window**: Occasionally cannot be closed (unknown cause)
 4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself)
 5. **Region-Locked Videos**: Interrupt auto-play; cannot be marked as watched since they fail to play
-6. **Other Issues**: Many edge cases remain untested
+6. **Tab Switching During Active Events**: Switching tabs while an event is in progress (e.g., scraper sync, video playback in main or PiP window) may cause unexpected issues such as UI state inconsistency and PiP window sync failures
+7. **Other Issues**: Many edge cases remain untested
 
 ### Future Plans
 
 1. **Built-in Watch Later**: Implement "Watch Later" and custom playlists similar to Niconico's あとで見る feature
 2. **Custom Playlists**: User-defined video collections
 3. **Improved State Sync**: Better synchronization between main window and PiP
-4. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
+4. **Keyboard Shortcuts**: Add global keyboard shortcuts for playback controls (play/pause, next/previous, volume)
+5. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
 
 ---
 
