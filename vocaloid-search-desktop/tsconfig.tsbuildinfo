@@ -1,0 +1,1 @@
+{"root":["./src/i18n.ts","./src/main.ts","./src/pip-main.ts","./src/api/tauri-commands.ts","./src/stores/index.ts","./src/stores/locale.ts","./src/stores/theme.ts","./src/app.vue","./src/pipapp.vue","./src/views/historyview.vue","./src/views/scraperview.vue","./src/views/searchview.vue"],"version":"5.7.3"}

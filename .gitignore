@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+target/
+
+# Original repositories (reference only)
+original-repo/
+vocalsearch-ref/
+
+# OpenSpec files (development tracking)
+openspec/
+
+# Opencode config (local settings)
+.opencode/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tauri
+vocaloid-search-desktop/src-tauri/target/
+
+# Temp files
+nul
+*.tmp
+*.temp

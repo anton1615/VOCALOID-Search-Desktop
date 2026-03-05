@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability for the main and pip windows","local":true,"windows":["main","pip"],"permissions":["core:default","core:window:allow-close","core:window:allow-destroy","shell:allow-open"]}}
