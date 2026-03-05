@@ -211,8 +211,8 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ### Known Issues
 
 1. **History Page**: Displays watch records but clicking videos does not work
-2. **PiP ↔ Main Window Sync**: State synchronization is incomplete
-   - Playback in PiP is not recorded to watch history
+2. **PiP ↔ Main Window Sync**: State synchronization is incomplete ✅ Fixed in v1.0.1
+   - ~~Playback in PiP is not recorded to watch history~~ PiP playback is now correctly recorded to watch history
    - Playback state is reset when opening/closing PiP
 3. **PiP Window**: Occasionally cannot be closed (unknown cause)
 4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself)

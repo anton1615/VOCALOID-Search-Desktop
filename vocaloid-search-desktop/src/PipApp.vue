@@ -10,6 +10,7 @@ const hasNext = ref(false)
 const iframeRef = ref<HTMLIFrameElement | null>(null)
 const isPlaying = ref(false)
 const playerReady = ref(false)
+const hasMarkedCurrent = ref(false)
 const autoPlay = ref(true)
 const autoSkip = ref(false)
 const skipThreshold = ref(30)
@@ -117,6 +118,7 @@ async function fetchUserInfo(video: Video) {
 
 async function handleVideoChange(video: Video, index: number, hasNextVideo: boolean) {
   console.log('[PiP] handleVideoChange called:', video.id, 'index:', index)
+  hasMarkedCurrent.value = false
   currentVideo.value = video
   currentIndex.value = index
   hasNext.value = hasNextVideo
@@ -146,6 +148,15 @@ function handleMessage(event: MessageEvent) {
 
     if (statusNum === 2) {
       isPlaying.value = true
+      if (currentVideo.value && !hasMarkedCurrent.value) {
+        api.markWatched(
+          currentVideo.value.id,
+          currentVideo.value.title,
+          currentVideo.value.thumbnail_url
+        )
+        currentVideo.value.is_watched = true
+        hasMarkedCurrent.value = true
+      }
     } else if (statusNum === 3) {
       isPlaying.value = false
     } else if (statusNum === 4) {
