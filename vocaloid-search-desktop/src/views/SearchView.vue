@@ -760,7 +760,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
             </div>
             
             <div class="stats-row">
-              <span class="stat views">👁 {{ formatNumber(video.view_count) }}</span>
+              <span class="stat views">▶ {{ formatNumber(video.view_count) }}</span>
               <span class="stat likes">❤️ {{ formatNumber(video.like_count) }}</span>
               <span class="stat mylists">📝 {{ formatNumber(video.mylist_count) }}</span>
               <span class="stat comments">💬 {{ formatNumber(video.comment_count) }}</span>
@@ -816,10 +816,10 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
               <span class="user-name">{{ getCachedUserNickname(currentVideo) }}</span>
             </div>
             <div class="stats">
-              <span class="stat view">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat like">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat mylist">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat comment">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat views">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat likes">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat mylists">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat comments">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
             </div>
           </div>
         </div>
@@ -1242,16 +1242,6 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.search-input {
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 8px;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-base);
-}
-
 .filters {
   display: flex;
   gap: var(--space-sm);
@@ -1417,7 +1407,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
 }
 
 .upload-datetime {
-  font-size: 11px;
+  font-size: 15px;
   color: var(--color-text-secondary-light);
   white-space: nowrap;
   flex-shrink: 0;
@@ -1438,10 +1428,10 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
   font-weight: 500;
 }
 
-.stat.views { color: #93C5FD; }
-.stat.mylists { color: #34d399; }
-.stat.likes { color: #f472b6; }
-.stat.comments { color: #fbbf24; }
+.stat.views { color: var(--color-stat-views); }
+.stat.mylists { color: var(--color-stat-mylists); }
+.stat.likes { color: var(--color-stat-likes); }
+.stat.comments { color: var(--color-stat-comments); }
 
 .tags-row {
   display: flex;
@@ -1616,8 +1606,8 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
 }
 
 .stat {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .video-container {

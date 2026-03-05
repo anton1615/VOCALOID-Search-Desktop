@@ -29,6 +29,17 @@ const progressPollInterval = ref<number | null>(null)
 const freshnessMessage = inject<string>('freshnessMessage', '')
 const databasePath = ref('')
 
+function formatDateTime(dateStr: string | null): string {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  const hour = date.getHours().toString().padStart(2, '0')
+  const minute = date.getMinutes().toString().padStart(2, '0')
+  return `${year}/${month}/${day} ${hour}:${minute} (JST)`
+}
+
 async function loadDatabasePath() {
   try {
     databasePath.value = await api.getDatabasePath()
@@ -168,7 +179,7 @@ onUnmounted(() => {
       <div class="stat">
         <span class="label">{{ t('scraper.lastUpdate') }}</span>
         <span class="value">
-          {{ stats.last_update ? new Date(stats.last_update).toLocaleString() : t('scraper.neverUpdated') }}
+          {{ stats.last_update ? formatDateTime(stats.last_update) : t('scraper.neverUpdated') }}
         </span>
       </div>
     </div>

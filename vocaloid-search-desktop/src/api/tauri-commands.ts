@@ -257,13 +257,7 @@ export function formatDuration(seconds: number | null): string {
 }
 
 export function formatNumber(n: number): string {
-  if (n >= 1000000) {
-    return (n / 1000000).toFixed(1) + 'M'
-  }
-  if (n >= 1000) {
-    return (n / 1000).toFixed(1) + 'K'
-  }
-  return n.toString()
+  return n.toLocaleString('en-US')
 }
 
 export function getUploaderAvatarUrl(uploaderId: string | null): string | null {

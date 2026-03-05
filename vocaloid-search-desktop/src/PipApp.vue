@@ -101,24 +101,6 @@ async function playPrevious() {
   }
 }
 
-async function toggleAutoSkip() {
-  autoSkip.value = !autoSkip.value
-  await api.setPlaybackSettings({
-    auto_play: autoPlay.value,
-    auto_skip: autoSkip.value,
-    skip_threshold: skipThreshold.value
-  })
-}
-
-async function updateSkipThreshold(value: number) {
-  skipThreshold.value = value
-  await api.setPlaybackSettings({
-    auto_play: autoPlay.value,
-    auto_skip: autoSkip.value,
-    skip_threshold: value
-  })
-}
-
 async function fetchUserInfo(video: Video) {
   if (!userInfoCache.has(video.id)) {
     try {
@@ -271,17 +253,6 @@ onUnmounted(() => {
         {{ isPlaying ? '⏸' : '▶' }}
       </button>
       <button @click="playNext" class="icon-btn" :disabled="!hasNext" title="下一首">⏭</button>
-      <div class="sidebar-divider"></div>
-      <div class="auto-skip-section">
-        <label class="toggle-label">
-          <input type="checkbox" :checked="autoSkip" @change="toggleAutoSkip">
-          <span>跳過</span>
-        </label>
-        <div v-if="autoSkip" class="threshold-input">
-          <input type="number" :value="skipThreshold" @change="updateSkipThreshold(parseInt(($event.target as HTMLInputElement).value, 10))" min="5" max="120" step="5">
-          <span>s</span>
-        </div>
-      </div>
     </div>
 
     <div class="player-column">
@@ -302,10 +273,10 @@ onUnmounted(() => {
               <span class="user-name">{{ getCachedUserNickname(currentVideo) }}</span>
             </div>
             <div class="stats">
-              <span class="stat">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat views">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat likes">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat mylists">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
+              <span class="stat comments">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
             </div>
           </div>
         </div>
@@ -351,40 +322,26 @@ onUnmounted(() => {
 }
 
 .sidebar {
-  width: 60px;
-  min-width: 60px;
+  width: 50px;
+  min-width: 50px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   padding: var(--space-md) var(--space-xs);
   gap: var(--space-sm);
   background: var(--color-bg-surface);
   border-right: 1px solid var(--color-border-subtle);
 }
 
-.sidebar-divider {
-  width: 100%;
-  height: 1px;
-  background: var(--color-border-subtle);
-  margin: var(--space-xs) 0;
-}
-
-.auto-skip-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--font-size-xs);
-}
-
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   color: var(--color-text-primary);
   background: transparent;
   transition: all 0.2s;
@@ -403,9 +360,9 @@ onUnmounted(() => {
 }
 
 .play-pause-btn {
-  width: 48px;
-  height: 48px;
-  font-size: 24px;
+  width: 42px;
+  height: 42px;
+  font-size: 20px;
   background: rgba(20, 184, 166, 0.1);
   color: var(--color-accent-primary);
   border-color: rgba(20, 184, 166, 0.2);
@@ -414,38 +371,6 @@ onUnmounted(() => {
 .play-pause-btn:hover {
   background: var(--color-accent-primary);
   color: var(--color-bg-primary);
-}
-
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-.toggle-label input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--color-accent-primary);
-}
-
-.threshold-input {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.threshold-input input {
-  width: 32px;
-  padding: 2px 4px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border-subtle);
-  color: var(--color-text-primary);
-  border-radius: 3px;
-  font-size: var(--font-size-xs);
-  text-align: center;
 }
 
 .player-column {
@@ -495,8 +420,8 @@ onUnmounted(() => {
 }
 
 .upload-datetime {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  font-size: 15px;
+  color: var(--color-text-secondary-light);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -538,13 +463,18 @@ onUnmounted(() => {
 
 .stats {
   display: flex;
-  gap: var(--space-md);
+  gap: var(--space-lg);
 }
 
 .stat {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
 }
+
+.stat.views { color: var(--color-stat-views); }
+.stat.likes { color: var(--color-stat-likes); }
+.stat.mylists { color: var(--color-stat-mylists); }
+.stat.comments { color: var(--color-stat-comments); }
 
 .video-container {
   flex-shrink: 0;

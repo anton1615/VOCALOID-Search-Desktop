@@ -4,10 +4,15 @@
   --color-bg-hover: #252540;
   --color-text-primary: #f0f0f0;
   --color-text-secondary: #a0a0b0;
+  --color-text-secondary-light: #c0c0d0;
   --color-text-muted: #606070;
   --color-border-subtle: #2a2a3a;
   --color-accent-primary: #14b8a6;
   --color-accent-secondary: #0d9488;
+  --color-stat-views: #93C5FD;
+  --color-stat-likes: #F87171;
+  --color-stat-mylists: #34D399;
+  --color-stat-comments: #FBBF24;
 }
 
 * {
