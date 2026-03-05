@@ -104,7 +104,7 @@ This is a desktop port of the [web-based VOCALOID Search](https://github.com/ant
 
 - **OS**: Windows 10/11 (x64)
 - **RAM**: 4GB minimum, 8GB recommended
-- **Storage**: ~500MB for application + database size varies
+- **Storage**: ~10MB for application executable. Database size depends on sync scope (e.g., VOCALOID keyword, 20 days, music category ≈ 40MB). WebView2 Runtime usually pre-installed on Windows 10/11.
 - **Network**: Internet connection required for video playback and data sync
 
 ## Data Storage
@@ -231,9 +231,11 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 5. **Open in Browser**: Interact with embedded player to open links in default browser, or add a button in PiP window to quickly open the current video's Niconico page
 6. **Global Volume Control**: Add application-wide volume control independent of the embedded player
 7. **Database Size Display**: Show current database size on the sync page
-8. **Clickable Tags**: Allow clicking tags to add them to the search box as search conditions
-9. **Title & Author Links**: Make video title and author name above the embedded player clickable to open their respective Niconico pages in default browser
-10. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
+8. **Database Size Estimation**: Estimate database size before sync based on search conditions to help users plan storage
+9. **Storage Space Check**: Warn users if insufficient storage space before starting sync
+10. **Clickable Tags**: Allow clicking tags to add them to the search box as search conditions
+11. **Title & Author Links**: Make video title and author name above the embedded player clickable to open their respective Niconico pages in default browser
+12. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
 
 ---
 
