@@ -91,8 +91,43 @@ function togglePlayPause() {
 }
 
 async function playNext() {
-  if (currentIndex.value >= 0 && hasNext.value) {
-    await api.setPlaylistIndex(currentIndex.value + 1)
+  if (currentIndex.value >= 0) {
+    // Check if we need to preload more results
+    // Load more when within 5 videos of the end
+    const playlistState = await api.getPlaylistState()
+    const remaining = playlistState.results.length - currentIndex.value - 1
+    
+    if (remaining <= 5 && hasNext.value) {
+      // Close to end, try to preload more
+      try {
+        const searchState = await api.getSearchState()
+        if (searchState.has_next) {
+          console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
+          await api.loadMore()
+        }
+      } catch (e) {
+        console.error('[PiP] Preload failed:', e)
+      }
+    } else if (!hasNext.value) {
+      // At the end, try to load more as last resort
+      try {
+        const searchState = await api.getSearchState()
+        if (searchState.has_next) {
+          console.log('[PiP] At end, loading more...')
+          await api.loadMore()
+          const newPlaylistState = await api.getPlaylistState()
+          if (newPlaylistState.index + 1 < newPlaylistState.results.length) {
+            hasNext.value = true
+          }
+        }
+      } catch (e) {
+        console.error('[PiP] loadMore failed:', e)
+      }
+    }
+    
+    if (hasNext.value) {
+      await api.setPlaylistIndex(currentIndex.value + 1)
+    }
   }
 }
 
@@ -181,6 +216,8 @@ function handleMessage(event: MessageEvent) {
 
 let unlistenVideoSelected: (() => void) | null = null
 let unlistenPlaybackSettings: (() => void) | null = null
+let unlistenVideoWatched: (() => void) | null = null
+let unlistenSearchResultsUpdated: (() => void) | null = null
 let unlistenResize: (() => void) | null = null
 let unlistenMove: (() => void) | null = null
 let unlistenClose: (() => void) | null = null
@@ -212,6 +249,25 @@ onMounted(async () => {
     autoPlay.value = settings.auto_play
     autoSkip.value = settings.auto_skip
     skipThreshold.value = settings.skip_threshold
+  })
+
+  unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
+    const { video_id, is_watched } = event.payload
+    console.log('[PiP] Received video-watched event:', video_id, is_watched)
+    if (currentVideo.value?.id === video_id) {
+      currentVideo.value.is_watched = is_watched
+    }
+  })
+
+  // Listen for search results updates from main window
+  unlistenSearchResultsUpdated = await listen('search-results-updated', async () => {
+    console.log('[PiP] Received search-results-updated event')
+    // Get fresh playlist state after results are updated
+    const playlistState = await api.getPlaylistState()
+    // If we have a current video, update hasNext based on new results
+    if (currentIndex.value >= 0 && currentIndex.value < playlistState.results.length) {
+      hasNext.value = currentIndex.value + 1 < playlistState.results.length
+    }
   })
 
   unlistenResize = await pipWindow.onResized(async () => {
@@ -250,6 +306,8 @@ onUnmounted(() => {
   window.removeEventListener('message', handleMessage)
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPlaybackSettings) unlistenPlaybackSettings()
+  if (unlistenVideoWatched) unlistenVideoWatched()
+  if (unlistenSearchResultsUpdated) unlistenSearchResultsUpdated()
   if (unlistenResize) unlistenResize()
   if (unlistenMove) unlistenMove()
   if (unlistenClose) unlistenClose()

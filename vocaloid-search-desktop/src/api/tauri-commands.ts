@@ -134,6 +134,18 @@ export interface PlaybackSettings {
   skip_threshold: number
 }
 
+export interface SearchState {
+  query: string
+  exclude_watched: boolean
+  filters?: Filters
+  sort?: SortConfig
+  formula_filter?: FormulaFilter
+  page: number
+  page_size: number
+  has_next: boolean
+  total_count: number
+}
+
 export interface VideoSelectedPayload {
   video: Video
   index: number
@@ -230,6 +242,18 @@ export const api = {
 
   setPlaybackSettings: async (settings: PlaybackSettings): Promise<void> => {
     return invoke('set_playback_settings', { settings })
+  },
+
+  getSearchState: async (): Promise<SearchState> => {
+    return invoke('get_search_state')
+  },
+
+  setSearchState: async (searchState: SearchState): Promise<void> => {
+    return invoke('set_search_state', { searchState })
+  },
+
+  loadMore: async (): Promise<SearchResponse> => {
+    return invoke('load_more')
   },
 
   savePipWindowState: async (state: PipWindowState): Promise<void> => {

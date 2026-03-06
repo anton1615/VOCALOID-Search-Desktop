@@ -152,6 +152,9 @@ pub fn run() {
         commands::set_playlist_index,
         commands::get_playback_settings,
         commands::set_playback_settings,
+        commands::get_search_state,
+        commands::set_search_state,
+        commands::load_more,
         commands::save_pip_window_state,
         commands::load_pip_window_state,
     ])

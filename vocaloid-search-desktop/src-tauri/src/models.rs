@@ -209,6 +209,19 @@ pub struct PlaybackSettings {
     pub skip_threshold: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SearchState {
+    pub query: String,
+    pub exclude_watched: bool,
+    pub filters: Option<Filters>,
+    pub sort: Option<SortConfig>,
+    pub formula_filter: Option<FormulaFilter>,
+    pub page: usize,
+    pub page_size: usize,
+    pub has_next: bool,
+    pub total_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoSelectedPayload {
     pub video: Video,

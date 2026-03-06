@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::models::{ScraperConfig, ScraperProgress, Video};
+use crate::models::{ScraperConfig, ScraperProgress, SearchState, Video};
 use async_channel::Sender;
 use parking_lot::RwLock;
 use std::path::PathBuf;
@@ -17,6 +17,7 @@ pub struct AppState {
     pub scraper_progress: Arc<RwLock<ScraperProgress>>,
     pub scraper_cancel: Arc<RwLock<Option<Sender<()>>>>,
     pub config: Arc<RwLock<ScraperConfig>>,
+    pub search_state: Arc<RwLock<SearchState>>,
 }
 
 impl AppState {
@@ -38,6 +39,7 @@ impl AppState {
             })),
             scraper_cancel: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(ScraperConfig::default())),
+            search_state: Arc::new(RwLock::new(SearchState::default())),
         }
     }
 }

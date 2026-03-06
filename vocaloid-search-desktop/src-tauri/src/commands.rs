@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::models::*;
-use crate::scraper::{Scraper, snapshot_to_db_row, check_snapshot_api_last_update, get_daily_update_threshold};
+use crate::scraper::{Scraper, snapshot_to_db_row, check_snapshot_api_last_update};
 use crate::state::AppState;
 use async_channel;
 use quick_xml::Reader;
@@ -95,6 +95,218 @@ pub async fn set_playback_settings(
     app.emit("playback-settings-changed", &settings).map_err(|e| e.to_string())?;
     
     Ok(())
+}
+
+
+#[tauri::command]
+pub async fn get_search_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<SearchState, String> {
+    let search_state = state.search_state.read().clone();
+    Ok(search_state)
+}
+
+#[tauri::command]
+pub async fn set_search_state(
+    app: AppHandle,
+    search_state: SearchState,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut current = state.search_state.write();
+        *current = search_state;
+    }
+    app.emit("search-state-changed", &state.search_state.read().clone()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn load_more(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SearchResponse, String> {
+    // Get current search state
+    let search_state = state.search_state.read().clone();
+    
+    // Check if there are more results
+    if !search_state.has_next {
+        return Err("No more results to load".to_string());
+    }
+    
+    // Increment page and update state
+    let next_page = search_state.page + 1;
+    {
+        let mut ss = state.search_state.write();
+        ss.page = next_page;
+    }
+    
+    // Construct SearchRequest from SearchState
+    let request = SearchRequest {
+        query: search_state.query.clone(),
+        page: next_page,
+        page_size: search_state.page_size,
+        exclude_watched: search_state.exclude_watched,
+        filters: search_state.filters.clone(),
+        sort: search_state.sort.clone(),
+        formula_filter: search_state.formula_filter.clone(),
+    };
+    
+    // Execute search using helper
+    let response = execute_search(&state, &request)?;
+    
+    // Update search state with new has_next
+    {
+        let mut ss = state.search_state.write();
+        ss.has_next = response.has_next;
+        ss.total_count = response.total;
+    }
+    
+    // Emit event for UI update
+    app.emit("search-results-updated", &response).map_err(|e| e.to_string())?;
+    
+    Ok(response)
+}
+
+fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchResponse, String> {
+    let conn = state.db.connect().map_err(|e| e.to_string())?;
+    
+    let mut sql = String::from(
+        "SELECT v.id, v.title, v.thumbnail_url, v.watch_url,          v.view_count, v.comment_count, v.mylist_count, v.like_count,          v.start_time, v.tags, v.duration, v.uploader_id, v.uploader_name, v.description          FROM videos v"
+    );
+    
+    let mut count_sql = String::from("SELECT COUNT(*) as total FROM videos v");
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut where_clauses: Vec<String> = Vec::new();
+    
+    if !request.query.is_empty() {
+        where_clauses.push("(v.title LIKE ? OR v.tags LIKE ?)".to_string());
+        let query_pattern = format!("%{}%", request.query.replace('%', r"\%").replace('_', r"\_"));
+        params.push(Box::new(query_pattern.clone()));
+        params.push(Box::new(query_pattern));
+    }
+    
+    if let Some(ref filters) = request.filters {
+        if let Some(ref v) = filters.view {
+            if let Some(gte) = v.gte { where_clauses.push("v.view_count >= ?".to_string()); params.push(Box::new(gte as i64)); }
+            if let Some(lte) = v.lte { where_clauses.push("v.view_count <= ?".to_string()); params.push(Box::new(lte as i64)); }
+        }
+        if let Some(ref m) = filters.mylist {
+            if let Some(gte) = m.gte { where_clauses.push("v.mylist_count >= ?".to_string()); params.push(Box::new(gte as i64)); }
+            if let Some(lte) = m.lte { where_clauses.push("v.mylist_count <= ?".to_string()); params.push(Box::new(lte as i64)); }
+        }
+        if let Some(ref c) = filters.comment {
+            if let Some(gte) = c.gte { where_clauses.push("v.comment_count >= ?".to_string()); params.push(Box::new(gte as i64)); }
+            if let Some(lte) = c.lte { where_clauses.push("v.comment_count <= ?".to_string()); params.push(Box::new(lte as i64)); }
+        }
+        if let Some(ref l) = filters.like {
+            if let Some(gte) = l.gte { where_clauses.push("v.like_count >= ?".to_string()); params.push(Box::new(gte as i64)); }
+            if let Some(lte) = l.lte { where_clauses.push("v.like_count <= ?".to_string()); params.push(Box::new(lte as i64)); }
+        }
+        if let Some(ref t) = filters.start_time {
+            if let Some(ref gte) = t.gte {
+                let gte_str = format!("{}T00:00:00+09:00", gte);
+                where_clauses.push("v.start_time >= ?".to_string());
+                params.push(Box::new(gte_str));
+            }
+            if let Some(ref lte) = t.lte {
+                let lte_str = format!("{}T23:59:59+09:00", lte);
+                where_clauses.push("v.start_time <= ?".to_string());
+                params.push(Box::new(lte_str));
+            }
+        }
+    }
+    
+    if request.exclude_watched {
+        where_clauses.push("NOT EXISTS (SELECT 1 FROM history h WHERE h.video_id = v.id)".to_string());
+    }
+    
+    if !where_clauses.is_empty() {
+        let where_clause = format!(" WHERE {}", where_clauses.join(" AND "));
+        sql.push_str(&where_clause);
+        count_sql.push_str(&where_clause);
+    }
+    
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    
+    let total: usize = conn.query_row(&count_sql, &params_refs[..], |row| {
+        row.get::<_, i64>(0).map(|n| n as usize)
+    }).unwrap_or(0);
+    
+    let order_by = if let Some(ref sort) = request.sort {
+        let field = match sort.by.as_str() {
+            "view" => "v.view_count",
+            "mylist" => "v.mylist_count",
+            "comment" => "v.comment_count",
+            "like" => "v.like_count",
+            "start_time" => "v.start_time",
+            "custom" => {
+                if let Some(ref weights) = sort.weights {
+                    &format!(
+                        "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
+                        weights.view, weights.mylist, weights.comment, weights.like
+                    ).leak()
+                } else {
+                    "v.view_count"
+                }
+            }
+            _ => "v.view_count",
+        };
+        let direction = if sort.direction == "asc" { "ASC" } else { "DESC" };
+        format!(" ORDER BY {} {}", field, direction)
+    } else {
+        " ORDER BY v.view_count DESC".to_string()
+    };
+    
+    sql.push_str(&order_by);
+    sql.push_str(&format!(" LIMIT {} OFFSET {}", request.page_size, (request.page - 1) * request.page_size));
+    
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    
+    let results: Vec<Video> = stmt.query_map(&params_refs[..], |row| {
+        let id: String = row.get(0)?;
+        let is_watched = state.db.is_video_watched(&id).unwrap_or(false);
+        
+        Ok(Video {
+            id,
+            title: row.get(1)?,
+            thumbnail_url: row.get(2)?,
+            watch_url: row.get(3)?,
+            view_count: row.get(4)?,
+            comment_count: row.get(5)?,
+            mylist_count: row.get(6)?,
+            like_count: row.get(7)?,
+            start_time: row.get(8)?,
+            tags: parse_tags(row.get::<_, Option<String>>(9)?.as_deref()),
+            duration: row.get(10)?,
+            uploader_id: row.get(11)?,
+            uploader_name: row.get(12)?,
+            description: row.get(13)?,
+            is_watched,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|v| v.ok())
+    .collect();
+    
+    let has_next = (request.page * request.page_size) < total;
+
+    {
+        let mut results_lock = state.search_results.write();
+        if request.page == 1 {
+            *results_lock = results.clone();
+            let mut index_lock = state.playlist_index.write();
+            *index_lock = 0;
+        } else {
+            results_lock.extend(results.clone());
+        }
+    }
+    
+    Ok(SearchResponse {
+        total,
+        page: request.page,
+        page_size: request.page_size,
+        has_next,
+        results,
+    })
 }
 
 fn parse_tags(tags: Option<&str>) -> Vec<String> {
@@ -254,6 +466,25 @@ pub async fn search(
     .collect();
     
     let has_next = (request.page * request.page_size) < total;
+
+    // Update search_state when starting a new search (page 1)
+    if request.page == 1 {
+        let mut ss = state.search_state.write();
+        ss.query = request.query.clone();
+        ss.exclude_watched = request.exclude_watched;
+        ss.filters = request.filters.clone();
+        ss.sort = request.sort.clone();
+        ss.formula_filter = request.formula_filter.clone();
+        ss.page = 1;
+        ss.page_size = request.page_size;
+        ss.has_next = has_next;
+        ss.total_count = total;
+    } else {
+        // Update pagination state for subsequent pages
+        let mut ss = state.search_state.write();
+        ss.page = request.page;
+        ss.has_next = has_next;
+    }
 
     {
         let mut results_lock = state.search_results.write();
@@ -477,12 +708,30 @@ pub async fn fetch_video_metadata(
 
 #[tauri::command]
 pub async fn mark_watched(
+    app: AppHandle,
     video_id: String,
     title: String,
     thumbnail_url: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.db.mark_watched(&video_id, &title, thumbnail_url.as_deref()).map_err(|e| e.to_string())
+    // 1. Update database
+    state.db.mark_watched(&video_id, &title, thumbnail_url.as_deref()).map_err(|e| e.to_string())?;
+    
+    // 2. Update AppState.search_results
+    {
+        let mut results = state.search_results.write();
+        if let Some(video) = results.iter_mut().find(|v| v.id == video_id) {
+            video.is_watched = true;
+        }
+    }
+    
+    // 3. Emit event for UI update
+    app.emit("video-watched", serde_json::json!({
+        "video_id": video_id,
+        "is_watched": true
+    })).map_err(|e| e.to_string())?;
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -688,18 +937,37 @@ pub async fn check_database_freshness(
 ) -> Result<FreshnessCheck, String> {
     let local_last_update = state.db.get_last_update().map_err(|e| e.to_string())?;
     let api_last_update = check_snapshot_api_last_update().await.ok().flatten();
-    let daily_threshold = get_daily_update_threshold();
     
     let is_fresh = if local_last_update.is_none() {
         false
     } else if let Some(ref local) = local_last_update {
         let local_str = local.as_str();
-        let is_after_6am = local_str >= daily_threshold.as_str();
+        
+        // Check if local is at least as new as API
         let is_newer_than_api = api_last_update.as_ref()
             .map(|api| local_str >= api.as_str())
             .unwrap_or(true);
         
-        is_after_6am && is_newer_than_api
+        if is_newer_than_api {
+            // Local data is at least as new as API - fresh
+            true
+        } else {
+            // API has newer data - check if within acceptable window (24 hours)
+            // If updated within last 24 hours, still consider fresh for offline use
+            use chrono::{DateTime, Utc};
+            let jst_offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+            
+            // Parse time with timezone suffix
+            let local_with_tz = format!("{} +09:00", local_str);
+            if let Ok(local_time) = DateTime::parse_from_str(&local_with_tz, "%Y-%m-%d %H:%M:%S %:z") {
+                let now = Utc::now().with_timezone(&jst_offset);
+                let hours_since_update = (now - local_time.with_timezone(&jst_offset)).num_hours();
+                // Consider fresh if updated within last 24 hours
+                hours_since_update < 24
+            } else {
+                false
+            }
+        }
     } else {
         false
     };
@@ -709,10 +977,14 @@ pub async fn check_database_freshness(
     } else if local_last_update.is_none() {
         "資料庫為空，請先同步資料".to_string()
     } else if let Some(ref local) = local_last_update {
-        if local.as_str() < daily_threshold.as_str() {
-            "資料庫過時，建議更新 (上次更新早於今日 6:00)".to_string()
+        if let Some(ref api) = api_last_update {
+            if local.as_str() < api.as_str() {
+                "有新的資料庫更新可用".to_string()
+            } else {
+                "資料庫可能過時，建議重新同步".to_string()
+            }
         } else {
-            "有新的資料庫更新可用".to_string()
+            "無法檢查 API 更新狀態".to_string()
         }
     } else {
         "資料庫狀態未知".to_string()

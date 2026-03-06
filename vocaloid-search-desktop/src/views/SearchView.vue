@@ -215,63 +215,15 @@ async function loadMore() {
   if (loadingMore.value || !hasNext.value) return
   
   loadingMore.value = true
-  page.value++
-  
-  const filters: Filters = {}
-  
-  if (Number.isFinite(viewGte.value) || Number.isFinite(viewLte.value)) {
-    filters.view = {}
-    if (Number.isFinite(viewGte.value)) filters.view.gte = viewGte.value
-    if (Number.isFinite(viewLte.value)) filters.view.lte = viewLte.value
-  }
-  if (Number.isFinite(mylistGte.value) || Number.isFinite(mylistLte.value)) {
-    filters.mylist = {}
-    if (Number.isFinite(mylistGte.value)) filters.mylist.gte = mylistGte.value
-    if (Number.isFinite(mylistLte.value)) filters.mylist.lte = mylistLte.value
-  }
-  if (Number.isFinite(commentGte.value) || Number.isFinite(commentLte.value)) {
-    filters.comment = {}
-    if (Number.isFinite(commentGte.value)) filters.comment.gte = commentGte.value
-    if (Number.isFinite(commentLte.value)) filters.comment.lte = commentLte.value
-  }
-  if (Number.isFinite(likeGte.value) || Number.isFinite(likeLte.value)) {
-    filters.like = {}
-    if (Number.isFinite(likeGte.value)) filters.like.gte = likeGte.value
-    if (Number.isFinite(likeLte.value)) filters.like.lte = likeLte.value
-  }
-  if (startTimeGte.value || startTimeLte.value) {
-    filters.start_time = {}
-    if (startTimeGte.value) filters.start_time.gte = startTimeGte.value
-    if (startTimeLte.value) filters.start_time.lte = startTimeLte.value
-  }
-  
-  const hasFilters = Object.keys(filters).length > 0
   
   try {
-    const response = await api.search({
-      query: query.value || undefined,
-      page: page.value,
-      page_size: pageSize.value,
-      sort: { 
-        by: sortField.value, 
-        direction: sortOrder.value,
-        weights: sortField.value === 'custom' ? sortWeights : undefined
-      },
-      exclude_watched: excludeWatched.value,
-      filters: hasFilters ? filters : undefined,
-      formula_filter: showFormulaFilter.value && formulaMinScore.value > 0 ? {
-        view_weight: formulaWeights.view,
-        mylist_weight: formulaWeights.mylist,
-        comment_weight: formulaWeights.comment,
-        like_weight: formulaWeights.like,
-        min_score: formulaMinScore.value
-      } : undefined,
-    })
+    const response = await api.loadMore()
+    // Append new results from Rust
     results.value = [...results.value, ...response.results]
+    page.value++
     hasNext.value = response.has_next
   } catch (e) {
     console.error('Load more error:', e)
-    page.value--
   } finally {
     loadingMore.value = false
   }
@@ -577,6 +529,7 @@ function setupObserver() {
 let unlistenPip: (() => void) | null = null
 let unlistenVideoSelected: (() => void) | null = null
 let unlistenPlaybackSettings: (() => void) | null = null
+let unlistenVideoWatched: (() => void) | null = null
 
 onMounted(async () => {
   loadSearchState()
@@ -602,6 +555,34 @@ onMounted(async () => {
     isPlaying.value = false
     descriptionExpanded.value = false
 
+    // Scroll to keep 2 videos visible below current playing video
+    // Check if the video 2 positions below is visible
+    const nextNextVideoElement = document.getElementById('video-' + (payload.index + 2))
+    if (nextNextVideoElement) {
+      // There are at least 2 videos below, check if they're visible
+      const rect = nextNextVideoElement.getBoundingClientRect()
+      const listContainer = document.querySelector('.video-list')
+      if (listContainer) {
+        const containerRect = listContainer.getBoundingClientRect()
+        // If the 2nd video below is below the visible area, scroll
+        if (rect.bottom > containerRect.bottom) {
+          nextNextVideoElement.scrollIntoView({ behavior: 'smooth', block: 'end' })
+        }
+      }
+    } else {
+      // Less than 2 videos below, just scroll current into view
+      const videoElement = document.getElementById('video-' + payload.index)
+      if (videoElement) {
+        videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+    }
+    // Preload more results when approaching end of list
+    const remaining = results.value.length - payload.index - 1
+    if (remaining <= 10 && hasNext.value && !loadingMore.value) {
+      console.log('[SearchView] Preloading more results... (remaining:', remaining, ')')
+      loadMore()
+    }
+
     if (!userInfoCache.has(payload.video.id)) {
       api.getUserInfo(payload.video.id).then(userInfo => {
         if (userInfo) {
@@ -620,6 +601,20 @@ onMounted(async () => {
     autoSkip.value = settings.auto_skip
     skipThreshold.value = settings.skip_threshold
   })
+
+  unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
+    const { video_id, is_watched } = event.payload
+    console.log('[SearchView] Received video-watched event:', video_id, is_watched)
+    // Update results array
+    const video = results.value.find(v => v.id === video_id)
+    if (video) {
+      video.is_watched = is_watched
+    }
+    // Update currentVideo if it matches
+    if (currentVideo.value?.id === video_id) {
+      currentVideo.value.is_watched = is_watched
+    }
+  })
 })
 
 onUnmounted(() => {
@@ -629,6 +624,7 @@ onUnmounted(() => {
   if (unlistenPip) unlistenPip()
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPlaybackSettings) unlistenPlaybackSettings()
+  if (unlistenVideoWatched) unlistenVideoWatched()
 })
 
 watch(autoPlay, async (val) => {
@@ -733,6 +729,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
         <div
           v-for="(video, idx) in results"
           :key="video.id"
+          :id="'video-' + idx"
           class="video-item"
           :class="{ playing: currentVideo?.id === video.id, watched: video.is_watched }"
         >

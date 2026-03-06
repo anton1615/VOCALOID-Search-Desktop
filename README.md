@@ -215,13 +215,12 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 1. **History Page**: Displays watch records but clicking videos does not work
 2. **PiP ↔ Main Window Sync**: State synchronization is incomplete ✅ Fixed in v1.0.1
    - ~~Playback in PiP is not recorded to watch history~~ PiP playback is now correctly recorded to watch history
-   - Playback state is reset when opening/closing PiP
+   - ~~Playback state is reset when opening/closing PiP~~ Fixed in v1.1.0
 3. **PiP Window**: Occasionally cannot be closed (unknown cause)
-4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself)
+4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself) ✅ Fixed in v1.1.0
 5. **Region-Locked Videos**: Interrupt auto-play; cannot be marked as watched since they fail to play
 6. **Tab Switching During Active Events**: Switching tabs while an event is in progress (e.g., scraper sync, video playback in main or PiP window) may cause unexpected issues such as UI state inconsistency and PiP window sync failures
 7. **Other Issues**: Many edge cases remain untested
-
 ### Future Plans
 
 1. **Built-in Watch Later**: Implement "Watch Later" and custom playlists similar to Niconico's あとで見る feature
@@ -242,3 +241,40 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ## License
 
 [MIT License](./LICENSE)
+
+---
+
+## Release Notes
+
+### v1.1.0 - Architecture Refactor
+
+**Major Changes:**
+- **Rust Unified State Management**: All application state is now managed by Rust AppState, with frontend components acting as pure display layers
+- **SearchState in AppState**: Search parameters (query, filters, sort, page) are now stored in `AppState.search_state` for consistent access across windows
+- **is_watched Sync**: Watch status is now synchronized between main window and PiP without explicit per-window sync logic
+- **loadMore from Any Window**: PiP can now trigger `loadMore()` directly when reaching end of results, eliminating playback interruptions
+
+**Bug Fixes:**
+- Fixed database freshness check logic - now correctly compares against the most recent 6:00 JST threshold
+- Fixed PiP playback discontinuity at result boundaries - preload kicks in before reaching the end
+- Added auto-scroll during continuous playback - keeps current playing video visible with 2 videos below
+
+### v1.0.2 - Bug Fix
+
+**Bug Fixes:**
+- Fixed "Exclude Watched" filter returning empty results - corrected SQL table reference from `watched` to `history`
+
+### v1.0.0 - Initial Release
+
+Initial release of VOCALOID Search Desktop with core features:
+- Modern Spotify-inspired UI with light/dark mode
+- Multi-language support (English, Japanese, Chinese Traditional)
+- PiP window for picture-in-picture playback
+- Watch history tracking
+- Exclude watched filter
+- Window state persistence
+- Local SQLite database with FTS5 full-text search
+- Custom formula sorting & filtering
+- Auto-skip functionality
+- Embedded Niconico player with continuous playback
+- Infinite scroll pagination
