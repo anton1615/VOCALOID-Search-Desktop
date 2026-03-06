@@ -183,7 +183,7 @@ pub async fn search(
     }
     
     if request.exclude_watched {
-        where_clauses.push("NOT EXISTS (SELECT 1 FROM watched w WHERE w.video_id = v.id)".to_string());
+        where_clauses.push("NOT EXISTS (SELECT 1 FROM history h WHERE h.video_id = v.id)".to_string());
     }
     
     if !where_clauses.is_empty() {
