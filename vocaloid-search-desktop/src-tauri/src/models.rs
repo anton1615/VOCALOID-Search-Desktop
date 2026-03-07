@@ -200,6 +200,7 @@ pub struct PlaylistState {
     pub results: Vec<Video>,
     pub index: usize,
     pub has_next: bool,
+    pub pip_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

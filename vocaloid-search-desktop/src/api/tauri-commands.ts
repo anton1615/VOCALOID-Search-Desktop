@@ -126,6 +126,7 @@ export interface PlaylistState {
   results: Video[]
   index: number
   has_next: boolean
+  pip_active: boolean
 }
 
 export interface PlaybackSettings {

@@ -13,11 +13,13 @@ pub async fn get_playlist_state(
     let results = state.search_results.read().clone();
     let index = *state.playlist_index.read();
     let has_next = index + 1 < results.len();
-    
+    let pip_active = *state.pip_active.read();
+
     Ok(PlaylistState {
         results,
         index,
         has_next,
+        pip_active,
     })
 }
 

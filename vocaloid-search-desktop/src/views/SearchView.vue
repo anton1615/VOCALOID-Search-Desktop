@@ -536,7 +536,40 @@ onMounted(async () => {
   window.addEventListener('message', handleMessage)
   document.addEventListener('click', handleSortClickOutside)
   setupObserver()
-  search()
+
+  // Check if Rust AppState has existing state before searching
+  try {
+    const playlistState = await api.getPlaylistState()
+    const searchState = await api.getSearchState()
+    
+    if (playlistState.results.length > 0) {
+      // Restore existing state from Rust
+      console.log('[SearchView] Restoring state from Rust:', playlistState.results.length, 'videos, index:', playlistState.index)
+      results.value = playlistState.results
+      currentVideoIndex.value = playlistState.index
+      hasNext.value = searchState.has_next
+      totalCount.value = searchState.total_count
+      page.value = searchState.page
+      
+      // Restore current video if index is valid
+      if (playlistState.index >= 0 && playlistState.index < playlistState.results.length) {
+        currentVideo.value = playlistState.results[playlistState.index]
+        currentUserInfo.value = userInfoCache.get(currentVideo.value.id) || null
+      }
+      
+      // Restore PiP active state
+      pipActive.value = playlistState.pip_active
+      console.log('[SearchView] Restored pipActive:', pipActive.value)
+    } else {
+      // No existing state, perform initial search
+      console.log('[SearchView] No existing state, performing initial search')
+      await search()
+    }
+  } catch (e) {
+    console.error('[SearchView] Failed to restore state:', e)
+    // Fallback to initial search on error
+    await search()
+  }
 
   unlistenPip = await listen('pip-closed', () => {
     console.log('[SearchView] Received pip-closed event')

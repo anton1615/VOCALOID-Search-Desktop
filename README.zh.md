@@ -219,8 +219,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 3. **PiP 視窗**：偶爾無法關閉（原因不明）
 4. **PiP 播放清單載入**：當 PiP 到達已載入結果的結尾時，會等待主視窗載入更多（PiP 本身無法觸發載入更多） ✅ v1.1.0 已修復
 5. **地區限制影片**：會中斷自動播放，因無法播放也無法標記為已觀看
-6. **事件進行中切換分頁**：在事件進行中（如爬蟲同步、主視窗或 PiP 視窗播放影片）切換分頁可能導致不可預期的問題，例如 UI 狀態不一致、PiP 視窗同步失敗等
-7. **其他**：許多邊緣情況尚未測試
+6. **事件進行中切換分頁**：在事件進行中（如爬蟲同步、主視窗或 PiP 視窗播放影片）切換分頁可能導致不可預期的問題
+   - ~~切回搜尋頁面時 UI 狀態不一致~~ v1.1.2 已修復 - SearchView 現在從 Rust 恢復狀態
+   - PiP 視窗同步失敗（罕見，原因不明）
 ### 未來計劃
 
 1. **內建「稍後觀看」**：實作類似 Niconico「あとで見る」的功能
@@ -245,6 +246,13 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ---
 
 ## 版本更新說明
+
+### v1.1.2 - 錯誤修復
+
+**錯誤修復:**
+- 修正播放中切換分頁時 UI 狀態不一致的問題 - SearchView 現在從 Rust AppState 恢復狀態，不會再重置
+- 修正切換分頁時 PiP 狀態未恢復的問題 - `pipActive` 現在與 Rust AppState 同步
+- 修正關閉主視窗時 PiP 視窗殘留的問題 - PiP 視窗現在會隨主視窗自動關閉
 
 ### v1.1.1 - 錯誤修復
 

@@ -219,8 +219,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 3. **PiP Window**: Occasionally cannot be closed (unknown cause)
 4. **PiP Playlist Loading**: When PiP reaches the end of loaded results, it waits for the main window to load more (PiP cannot trigger load more itself) ✅ Fixed in v1.1.0
 5. **Region-Locked Videos**: Interrupt auto-play; cannot be marked as watched since they fail to play
-6. **Tab Switching During Active Events**: Switching tabs while an event is in progress (e.g., scraper sync, video playback in main or PiP window) may cause unexpected issues such as UI state inconsistency and PiP window sync failures
-7. **Other Issues**: Many edge cases remain untested
+6. **Tab Switching During Active Events**: Switching tabs while an event is in progress (e.g., scraper sync, video playback in main or PiP window) may cause unexpected issues
+   - ~~UI state inconsistency when switching back to search page~~ Fixed in v1.1.2 - SearchView now restores state from Rust
+   - PiP window sync failures (rare, cause unknown)
 ### Future Plans
 
 1. **Built-in Watch Later**: Implement "Watch Later" and custom playlists similar to Niconico's あとで見る feature
@@ -245,6 +246,13 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ---
 
 ## Release Notes
+
+### v1.1.2 - Bug Fix
+
+**Bug Fixes:**
+- Fixed UI state inconsistency when switching tabs during playback - SearchView now restores state from Rust AppState instead of resetting
+- Fixed PiP state not being restored when switching tabs - `pipActive` is now synced with Rust AppState
+- Fixed orphaned PiP window when closing main window - PiP window now closes automatically with main window
 
 ### v1.1.1 - Bug Fix
 

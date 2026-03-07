@@ -59,6 +59,11 @@ pub fn run() {
                 let app_handle_clone = app_handle.clone();
                 tauri::WebviewWindow::on_window_event(&window, move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        // Close PiP window if open
+                        if let Some(pip_window) = app_handle_clone.get_webview_window("pip") {
+                            let _ = pip_window.close();
+                        }
+                        
                         if let Ok(pos) = window_clone.outer_position() {
                             if let Ok(size) = window_clone.inner_size() {
                                 let maximized = window_clone.is_maximized().unwrap_or(false);
@@ -105,6 +110,11 @@ pub fn run() {
                 let app_handle_clone = app_handle.clone();
                 tauri::WebviewWindow::on_window_event(&window, move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        // Close PiP window if open
+                        if let Some(pip_window) = app_handle_clone.get_webview_window("pip") {
+                            let _ = pip_window.close();
+                        }
+                        
                         if let Ok(pos) = window_clone.outer_position() {
                             if let Ok(size) = window_clone.inner_size() {
                                 let maximized = window_clone.is_maximized().unwrap_or(false);
