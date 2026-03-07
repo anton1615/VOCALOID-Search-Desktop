@@ -235,7 +235,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 10. **可點擊標籤**：點擊標籤可直接加入搜尋框作為搜尋條件
 11. **標題與作者連結**：嵌入式播放器上方的標題和作者名字加入超連結，可由預設瀏覽器開啟各自的 Niconico 原始頁面
 12. **Linux 支援**：利用 Tauri 的跨平台能力開發原生 Linux 版本
-
+13. **離線播放**：下載影片至本地，在無網路環境下也能觀看
 ---
 
 ## 授權
@@ -245,6 +245,11 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ---
 
 ## 版本更新說明
+
+### v1.1.1 - 錯誤修復
+
+**錯誤修復:**
+- 修正資料庫新鮮度判斷邏輯 - 現在正確地將上次更新時間與最近的 6:00 JST 分界點比較（先前使用了錯誤的 24 小時視窗邏輯）
 
 ### v1.1.0 - 架構重構
 

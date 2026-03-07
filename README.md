@@ -235,7 +235,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 10. **Clickable Tags**: Allow clicking tags to add them to the search box as search conditions
 11. **Title & Author Links**: Make video title and author name above the embedded player clickable to open their respective Niconico pages in default browser
 12. **Linux Support**: Native Linux builds using Tauri's cross-platform capabilities
-
+13. **Offline Playback**: Download videos locally for offline viewing when internet is unavailable
 ---
 
 ## License
@@ -245,6 +245,11 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 ---
 
 ## Release Notes
+
+### v1.1.1 - Bug Fix
+
+**Bug Fixes:**
+- Fixed database freshness check logic - now correctly compares last update time against the most recent 6:00 JST threshold (previously used incorrect 24-hour window logic)
 
 ### v1.1.0 - Architecture Refactor
 

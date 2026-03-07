@@ -938,36 +938,38 @@ pub async fn check_database_freshness(
     let local_last_update = state.db.get_last_update().map_err(|e| e.to_string())?;
     let api_last_update = check_snapshot_api_last_update().await.ok().flatten();
     
+    // Calculate the most recent 6:00 JST threshold
+    // Logic: Look back from now, find the first 6:00 JST
+    // If local update time >= this threshold, database is fresh
+    use chrono::{Utc, TimeZone, Datelike};
+    let jst_offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+    let now_jst = Utc::now().with_timezone(&jst_offset);
+    
+    // Calculate today's 6:00 JST
+    let today_6am_jst = jst_offset.with_ymd_and_hms(
+        now_jst.year(),
+        now_jst.month(),
+        now_jst.day(),
+        6, 0, 0
+    ).single().unwrap_or(now_jst);
+    
+    // If current time is before today's 6:00, the threshold is yesterday's 6:00
+    // Otherwise, the threshold is today's 6:00
+    let threshold_6am_jst = if now_jst < today_6am_jst {
+        // Before today's 6:00, use yesterday's 6:00
+        today_6am_jst - chrono::Duration::days(1)
+    } else {
+        // After today's 6:00, use today's 6:00
+        today_6am_jst
+    };
+    let threshold_str = threshold_6am_jst.format("%Y-%m-%d %H:%M:%S").to_string();
+    
     let is_fresh = if local_last_update.is_none() {
         false
     } else if let Some(ref local) = local_last_update {
         let local_str = local.as_str();
-        
-        // Check if local is at least as new as API
-        let is_newer_than_api = api_last_update.as_ref()
-            .map(|api| local_str >= api.as_str())
-            .unwrap_or(true);
-        
-        if is_newer_than_api {
-            // Local data is at least as new as API - fresh
-            true
-        } else {
-            // API has newer data - check if within acceptable window (24 hours)
-            // If updated within last 24 hours, still consider fresh for offline use
-            use chrono::{DateTime, Utc};
-            let jst_offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
-            
-            // Parse time with timezone suffix
-            let local_with_tz = format!("{} +09:00", local_str);
-            if let Ok(local_time) = DateTime::parse_from_str(&local_with_tz, "%Y-%m-%d %H:%M:%S %:z") {
-                let now = Utc::now().with_timezone(&jst_offset);
-                let hours_since_update = (now - local_time.with_timezone(&jst_offset)).num_hours();
-                // Consider fresh if updated within last 24 hours
-                hours_since_update < 24
-            } else {
-                false
-            }
-        }
+        // Database is fresh if last update >= the most recent 6:00 JST
+        local_str >= threshold_str.as_str()
     } else {
         false
     };
@@ -977,15 +979,11 @@ pub async fn check_database_freshness(
     } else if local_last_update.is_none() {
         "資料庫為空，請先同步資料".to_string()
     } else if let Some(ref local) = local_last_update {
-        if let Some(ref api) = api_last_update {
-            if local.as_str() < api.as_str() {
-                "有新的資料庫更新可用".to_string()
-            } else {
-                "資料庫可能過時，建議重新同步".to_string()
-            }
-        } else {
-            "無法檢查 API 更新狀態".to_string()
-        }
+        format!(
+            "資料庫過時，建議更新 (上次更新: {}, 分界點: {})",
+            local,
+            threshold_str
+        )
     } else {
         "資料庫狀態未知".to_string()
     };
