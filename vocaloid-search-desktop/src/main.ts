@@ -8,12 +8,14 @@ import './style.css'
 import SearchView from './views/SearchView.vue'
 import HistoryView from './views/HistoryView.vue'
 import ScraperView from './views/ScraperView.vue'
+import WatchLaterView from './views/WatchLaterView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', name: 'search', component: SearchView },
     { path: '/history', name: 'history', component: HistoryView },
+    { path: '/watch-later', name: 'watch-later', component: WatchLaterView },
     { path: '/scraper', name: 'scraper', component: ScraperView },
   ],
 })

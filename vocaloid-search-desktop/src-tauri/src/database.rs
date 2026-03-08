@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
 
-const SCHEMA: &str = r#"
+/// Schema for videos.db - contains only video metadata cache (rebuildable)
+const VIDEOS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -25,15 +26,6 @@ CREATE TABLE IF NOT EXISTS videos (
     uploader_name TEXT,
     last_update_time TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS history (
-    video_id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    thumbnail_url TEXT,
-    watched_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-DROP TABLE IF EXISTS watched;
 
 CREATE INDEX IF NOT EXISTS idx_view_count ON videos(view_count);
 CREATE INDEX IF NOT EXISTS idx_mylist_count ON videos(mylist_count);
@@ -65,6 +57,23 @@ CREATE TRIGGER IF NOT EXISTS videos_au AFTER UPDATE ON videos BEGIN
     INSERT INTO video_fts(rowid, title, tags) 
     VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
 END;
+"#;
+
+/// Schema for user_data.db - contains user-generated data (history, watch_later, config)
+const USER_DATA_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS history (
+    video_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    thumbnail_url TEXT,
+    watched_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS watch_later (
+    video_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    thumbnail_url TEXT,
+    added_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
@@ -108,49 +117,85 @@ pub fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
     }
 }
 
+pub fn get_videos_db_path(app: &tauri::AppHandle) -> PathBuf {
+    get_data_dir(app).join("videos.db")
+}
+
+pub fn get_user_data_db_path(app: &tauri::AppHandle) -> PathBuf {
+    get_data_dir(app).join("user_data.db")
+}
+
+/// Legacy function for backward compatibility - returns videos.db path
 pub fn get_db_path(app: &tauri::AppHandle) -> PathBuf {
-    get_data_dir(app).join("data.db")
+    get_videos_db_path(app)
 }
 
 pub fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
     get_data_dir(app).join("config.json")
 }
 
-pub fn init_db(path: &PathBuf) -> Result<(), rusqlite::Error> {
-    let conn = Connection::open(path)?;
-    conn.execute_batch(SCHEMA)?;
-    conn.pragma_update(None, "journal_mode", &"WAL")?;
-    conn.pragma_update(None, "synchronous", &"NORMAL")?;
-    conn.pragma_update(None, "cache_size", &-64000)?;
+pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), rusqlite::Error> {
+    // Initialize videos.db
+    let videos_conn = Connection::open(videos_path)?;
+    videos_conn.execute_batch(VIDEOS_SCHEMA)?;
+    videos_conn.pragma_update(None, "journal_mode", &"WAL")?;
+    videos_conn.pragma_update(None, "synchronous", &"NORMAL")?;
+    videos_conn.pragma_update(None, "cache_size", &-64000)?;
+    
+    // Initialize user_data.db
+    let user_data_conn = Connection::open(user_data_path)?;
+    user_data_conn.execute_batch(USER_DATA_SCHEMA)?;
+    user_data_conn.pragma_update(None, "journal_mode", &"WAL")?;
+    user_data_conn.pragma_update(None, "synchronous", &"NORMAL")?;
+    user_data_conn.pragma_update(None, "cache_size", &-64000)?;
+    
     Ok(())
 }
 
 pub struct Database {
-    path: Arc<PathBuf>,
+    videos_path: Arc<PathBuf>,
+    user_data_path: Arc<PathBuf>,
 }
 
 impl Clone for Database {
     fn clone(&self) -> Self {
         Self {
-            path: Arc::clone(&self.path),
+            videos_path: Arc::clone(&self.videos_path),
+            user_data_path: Arc::clone(&self.user_data_path),
         }
     }
 }
 
 impl Database {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(videos_path: PathBuf, user_data_path: PathBuf) -> Self {
         Self {
-            path: Arc::new(path),
+            videos_path: Arc::new(videos_path),
+            user_data_path: Arc::new(user_data_path),
         }
     }
 
-    pub fn connect(&self) -> Result<Connection, rusqlite::Error> {
-        let conn = Connection::open(&*self.path)?;
+    /// Connect to videos.db for video metadata operations
+    pub fn connect_videos(&self) -> Result<Connection, rusqlite::Error> {
+        let conn = Connection::open(&*self.videos_path)?;
         conn.pragma_update(None, "journal_mode", &"WAL")?;
         conn.pragma_update(None, "synchronous", &"NORMAL")?;
         conn.pragma_update(None, "cache_size", &-64000)?;
         conn.pragma_update(None, "mmap_size", &268435456)?;
         Ok(conn)
+    }
+
+    /// Connect to user_data.db for user data operations (history, watch_later, config)
+    pub fn connect_user_data(&self) -> Result<Connection, rusqlite::Error> {
+        let conn = Connection::open(&*self.user_data_path)?;
+        conn.pragma_update(None, "journal_mode", &"WAL")?;
+        conn.pragma_update(None, "synchronous", &"NORMAL")?;
+        conn.pragma_update(None, "cache_size", &-64000)?;
+        Ok(conn)
+    }
+
+    /// Legacy connect method - returns videos.db connection for backward compatibility
+    pub fn connect(&self) -> Result<Connection, rusqlite::Error> {
+        self.connect_videos()
     }
 
     pub fn get_total_videos(&self) -> Result<usize, rusqlite::Error> {
@@ -170,7 +215,7 @@ impl Database {
     }
 
     pub fn is_video_watched(&self, video_id: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_user_data()?;
         let exists: i64 = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM history WHERE video_id = ?)",
             [video_id],
@@ -179,16 +224,56 @@ impl Database {
         Ok(exists == 1)
     }
 
+    pub fn get_all_watched_video_ids(&self) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let mut stmt = conn.prepare("SELECT video_id FROM history")?;
+        let ids: Vec<String> = stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
+    }
+
     pub fn mark_watched(
         &self,
         video_id: &str,
         title: &str,
         thumbnail_url: Option<&str>,
     ) -> Result<(), rusqlite::Error> {
-        let conn = self.connect()?;
-        conn.execute(
+        let user_conn = self.connect_user_data()?;
+        let videos_conn = self.connect_videos()?;
+        
+        let is_bad_title = title.trim().is_empty() || title == "ニコニコ動画";
+        let existing: Option<(String, Option<String>)> = user_conn
+            .query_row(
+                "SELECT title, thumbnail_url FROM history WHERE video_id = ?",
+                [video_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        let from_videos: Option<(String, Option<String>)> = videos_conn
+            .query_row(
+                "SELECT title, thumbnail_url FROM videos WHERE id = ?",
+                [video_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        
+        let final_title = if !is_bad_title {
+            title.to_string()
+        } else if let Some((db_title, _)) = &from_videos {
+            db_title.clone()
+        } else if let Some((existing_title, _)) = &existing {
+            existing_title.clone()
+        } else {
+            title.to_string()
+        };
+        
+        let final_thumbnail = thumbnail_url
+            .map(|s| s.to_string())
+            .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()))
+            .or_else(|| existing.as_ref().and_then(|(_, thumb)| thumb.clone()));
+        
+        user_conn.execute(
             "INSERT OR REPLACE INTO history (video_id, title, thumbnail_url, watched_at) VALUES (?, ?, ?, datetime('now', '+9 hours'))",
-            params![video_id, title, thumbnail_url],
+            params![video_id, final_title, final_thumbnail],
         )?;
         Ok(())
     }
@@ -197,21 +282,51 @@ impl Database {
         &self,
         page: usize,
         page_size: usize,
+        sort_direction: Option<&str>,
     ) -> Result<Vec<crate::models::HistoryEntry>, rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_user_data()?;
+        let videos_conn = self.connect_videos()?;
         let offset = (page - 1) * page_size;
 
-        let mut stmt = conn.prepare(
-            "SELECT video_id, title, thumbnail_url, watched_at FROM history ORDER BY watched_at DESC LIMIT ? OFFSET ?"
-        )?;
+        let order = match sort_direction {
+            Some("asc") => "ASC",
+            _ => "DESC",
+        };
+        let sql = format!(
+            "SELECT video_id, title, thumbnail_url, watched_at FROM history ORDER BY watched_at {} LIMIT ? OFFSET ?",
+            order
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
 
         let entries: Vec<crate::models::HistoryEntry> = stmt
             .query_map([page_size as i64, offset as i64], |row| {
+                let video_id: String = row.get(0)?;
+                let stored_title: String = row.get(1)?;
+                let stored_thumbnail: Option<String> = row.get(2)?;
+                let watched_at: String = row.get(3)?;
+                
+                let from_videos: Option<(String, Option<String>)> = videos_conn
+                    .query_row(
+                        "SELECT title, thumbnail_url FROM videos WHERE id = ?",
+                        [&video_id],
+                        |video_row| Ok((video_row.get(0)?, video_row.get(1)?)),
+                    )
+                    .ok();
+                
+                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画" {
+                    from_videos.as_ref().map(|(t, _)| t.clone()).unwrap_or(stored_title)
+                } else {
+                    stored_title
+                };
+                let thumbnail_url = stored_thumbnail
+                    .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()));
+                
                 Ok(crate::models::HistoryEntry {
-                    video_id: row.get(0)?,
-                    title: row.get(1)?,
-                    thumbnail_url: row.get(2)?,
-                    watched_at: row.get(3)?,
+                    video_id,
+                    title,
+                    thumbnail_url,
+                    watched_at,
                 })
             })?
             .filter_map(|e| e.ok())
@@ -221,13 +336,13 @@ impl Database {
     }
 
     pub fn get_history_count(&self) -> Result<usize, rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_user_data()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 
     pub fn clear_videos(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_videos()?;
         conn.execute("DELETE FROM videos", [])?;
         Ok(())
     }
@@ -252,7 +367,7 @@ impl Database {
             Option<String>,
         )],
     ) -> Result<(), rusqlite::Error> {
-        let mut conn = self.connect()?;
+        let mut conn = self.connect_videos()?;
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare_cached(
@@ -275,7 +390,7 @@ impl Database {
     }
 
     pub fn get_config(&self) -> Result<StoredConfig, rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_user_data()?;
         let result: Option<String> = conn
             .query_row(
                 "SELECT value FROM config WHERE key = 'scraper'",
@@ -293,13 +408,141 @@ impl Database {
     }
 
     pub fn save_config(&self, config: &StoredConfig) -> Result<(), rusqlite::Error> {
-        let conn = self.connect()?;
+        let conn = self.connect_user_data()?;
         let json = serde_json::to_string(config).unwrap_or_else(|_| "{}".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO config (key, value) VALUES ('scraper', ?)",
             [&json],
         )?;
         Ok(())
+    }
+
+    // ===== Watch Later Methods =====
+
+    pub fn add_to_watch_later(
+        &self,
+        video_id: &str,
+        title: &str,
+        thumbnail_url: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let user_conn = self.connect_user_data()?;
+        let videos_conn = self.connect_videos()?;
+        
+        let is_bad_title = title.trim().is_empty() || title == "ニコニコ動画";
+        let existing: Option<(String, Option<String>)> = user_conn
+            .query_row(
+                "SELECT title, thumbnail_url FROM watch_later WHERE video_id = ?",
+                [video_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        let from_videos: Option<(String, Option<String>)> = videos_conn
+            .query_row(
+                "SELECT title, thumbnail_url FROM videos WHERE id = ?",
+                [video_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        
+        let final_title = if !is_bad_title {
+            title.to_string()
+        } else if let Some((db_title, _)) = &from_videos {
+            db_title.clone()
+        } else if let Some((existing_title, _)) = &existing {
+            existing_title.clone()
+        } else {
+            title.to_string()
+        };
+        
+        let final_thumbnail = thumbnail_url
+            .map(|s| s.to_string())
+            .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()))
+            .or_else(|| existing.as_ref().and_then(|(_, thumb)| thumb.clone()));
+        
+        user_conn.execute(
+            "INSERT OR REPLACE INTO watch_later (video_id, title, thumbnail_url, added_at) VALUES (?, ?, ?, datetime('now', '+9 hours'))",
+            params![video_id, final_title, final_thumbnail],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_from_watch_later(&self, video_id: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        conn.execute("DELETE FROM watch_later WHERE video_id = ?", [video_id])?;
+        Ok(())
+    }
+
+    pub fn is_in_watch_later(&self, video_id: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let exists: i64 = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM watch_later WHERE video_id = ?)",
+            [video_id],
+            |row| row.get(0),
+        )?;
+        Ok(exists == 1)
+    }
+
+    pub fn get_watch_later(
+        &self,
+        page: usize,
+        page_size: usize,
+        sort_direction: Option<&str>,
+    ) -> Result<Vec<crate::models::WatchLaterEntry>, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let videos_conn = self.connect_videos()?;
+        let offset = (page - 1) * page_size;
+
+        let order = match sort_direction {
+            Some("asc") => "ASC",
+            _ => "DESC",
+        };
+        let sql = format!(
+            "SELECT video_id, title, thumbnail_url, added_at FROM watch_later ORDER BY added_at {} LIMIT ? OFFSET ?",
+            order
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+
+        let entries: Vec<crate::models::WatchLaterEntry> = stmt
+            .query_map([page_size as i64, offset as i64], |row| {
+                let video_id: String = row.get(0)?;
+                let stored_title: String = row.get(1)?;
+                let stored_thumbnail: Option<String> = row.get(2)?;
+                let added_at: String = row.get(3)?;
+                
+                let from_videos: Option<(String, Option<String>)> = videos_conn
+                    .query_row(
+                        "SELECT title, thumbnail_url FROM videos WHERE id = ?",
+                        [&video_id],
+                        |video_row| Ok((video_row.get(0)?, video_row.get(1)?)),
+                    )
+                    .ok();
+                
+                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画" {
+                    from_videos.as_ref().map(|(t, _)| t.clone()).unwrap_or(stored_title)
+                } else {
+                    stored_title
+                };
+                let thumbnail_url = stored_thumbnail
+                    .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()));
+                
+                Ok(crate::models::WatchLaterEntry {
+                    video_id,
+                    title,
+                    thumbnail_url,
+                    added_at,
+                })
+            })?
+            .filter_map(|e| e.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    pub fn get_watch_later_count(&self) -> Result<usize, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM watch_later", [], |row| row.get(0))?;
+        Ok(count as usize)
     }
 }
 

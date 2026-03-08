@@ -3,6 +3,7 @@
     "title": "VOCALOID Search",
     "search": "搜尋",
     "history": "歷史",
+    "watchLater": "稍後觀看",
     "scraper": "同步",
     "logout": "登出",
     "lightMode": "淺色模式",
@@ -14,6 +15,7 @@
     "searching": "搜尋中...",
     "results": "找到 {count} 部影片",
     "noResults": "沒有結果",
+    "noMore": "沒有更多影片",
     "loadMore": "載入更多"
   },
   "filter": {
@@ -91,6 +93,22 @@
     "loadMore": "載入更多",
     "watchedAt": "觀看於",
     "videoNotFound": "無法取得影片資訊",
-    "fetchError": "取得影片資訊失敗"
+    "fetchError": "取得影片資訊失敗",
+    "videoDeletedHint": "此影片可能已被刪除",
+    "justNow": "剛剛",
+    "minutesAgo": "{count} 分鐘前",
+    "hoursAgo": "{count} 小時前",
+    "daysAgo": "{count} 天前"
+  },
+  "watchLater": {
+    "title": "稍後觀看",
+    "videos": "部影片",
+    "empty": "沒有待看影片",
+    "loading": "載入中...",
+    "remove": "從清單移除",
+    "justNow": "剛剛",
+    "minutesAgo": "{count} 分鐘前",
+    "hoursAgo": "{count} 小時前",
+    "daysAgo": "{count} 天前"
   }
 }

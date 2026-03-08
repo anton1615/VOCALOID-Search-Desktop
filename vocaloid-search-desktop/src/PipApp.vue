@@ -3,7 +3,7 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { api, type Video, type VideoSelectedPayload, type PlaybackSettings, type UserInfo, getUploaderAvatarUrl } from './api/tauri-commands'
-
+import WatchLaterButton from './components/WatchLaterButton.vue'
 const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
 const hasNext = ref(false)
@@ -317,6 +317,12 @@ onUnmounted(() => {
 <template>
   <div class="pip-container">
     <div class="sidebar">
+      <WatchLaterButton 
+        :video-id="currentVideo?.id || null"
+        :video-title="currentVideo?.title"
+        :thumbnail-url="currentVideo?.thumbnail_url"
+        :disabled="!currentVideo"
+      />
       <button @click="playPrevious" class="icon-btn" :disabled="currentIndex <= 0" title="上一首">⏮</button>
       <button @click="togglePlayPause" class="icon-btn play-pause-btn" :disabled="!currentVideo">
         {{ isPlaying ? '⏸' : '▶' }}

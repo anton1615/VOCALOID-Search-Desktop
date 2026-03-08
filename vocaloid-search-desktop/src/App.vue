@@ -58,6 +58,10 @@ onMounted(async () => {
         <span class="icon">📜</span>
         <span>{{ t('app.history') }}</span>
       </router-link>
+      <router-link to="/watch-later" class="nav-item">
+        <span class="icon">❤️</span>
+        <span>{{ t('app.watchLater') }}</span>
+      </router-link>
       <router-link to="/scraper" class="nav-item">
         <span class="icon">🔄</span>
         <span>{{ t('app.scraper') }}</span>

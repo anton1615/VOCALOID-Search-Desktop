@@ -10,12 +10,21 @@ use quick_xml::events::Event;
 pub async fn get_playlist_state(
     state: tauri::State<'_, AppState>,
 ) -> Result<PlaylistState, String> {
-    let results = state.search_results.read().clone();
+    let playlist_type = *state.playlist_type.read();
+    
+    // Get results based on playlist type
+    let results = match playlist_type {
+        PlaylistType::Search => state.search_results.read().clone(),
+        PlaylistType::History => state.history_results.read().clone(),
+        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    };
+    
     let index = *state.playlist_index.read();
     let has_next = index + 1 < results.len();
     let pip_active = *state.pip_active.read();
 
     Ok(PlaylistState {
+        playlist_type,
         results,
         index,
         has_next,
@@ -31,8 +40,15 @@ pub async fn set_playlist_index(
 ) -> Result<(), String> {
     println!("[set_playlist_index] Called with index: {}", index);
     
-    let results = state.search_results.read();
-    println!("[set_playlist_index] Results length: {}", results.len());
+    let playlist_type = *state.playlist_type.read();
+    
+    // Get results based on playlist type
+    let results = match playlist_type {
+        PlaylistType::Search => state.search_results.read().clone(),
+        PlaylistType::History => state.history_results.read().clone(),
+        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    };
+    println!("[set_playlist_index] Playlist type: {:?}, Results length: {}", playlist_type, results.len());
     
     if index >= results.len() {
         println!("[set_playlist_index] ERROR: Index {} >= len {}", index, results.len());
@@ -48,15 +64,38 @@ pub async fn set_playlist_index(
     let video = results[index].clone();
     let has_next = index + 1 < results.len();
     
-    println!("[set_playlist_index] Emitting video-selected: video_id={}, index={}, has_next={}", video.id, index, has_next);
+    println!("[set_playlist_index] Emitting video-selected: video_id={}, index={}, has_next={}, playlist_type={:?}", video.id, index, has_next, playlist_type);
 
     app.emit("video-selected", VideoSelectedPayload {
         video,
         index,
         has_next,
+        playlist_type,
     }).map_err(|e| e.to_string())?;
 
     println!("[set_playlist_index] Event emitted successfully");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_playlist_video(
+    index: usize,
+    video: Video,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let playlist_type = *state.playlist_type.read();
+    
+    let mut results = match playlist_type {
+        PlaylistType::Search => state.search_results.write(),
+        PlaylistType::History => state.history_results.write(),
+        PlaylistType::WatchLater => state.watch_later_results.write(),
+    };
+    
+    if index >= results.len() {
+        return Err("Index out of bounds".to_string());
+    }
+    
+    results[index] = video;
     Ok(())
 }
 
@@ -219,7 +258,15 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     }
     
     if request.exclude_watched {
-        where_clauses.push("NOT EXISTS (SELECT 1 FROM history h WHERE h.video_id = v.id)".to_string());
+        // Get watched video IDs from user_data.db (history table is now separate)
+        let watched_ids = state.db.get_all_watched_video_ids().unwrap_or_default();
+        if !watched_ids.is_empty() {
+            let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
+            where_clauses.push(format!("v.id NOT IN ({})", placeholders.join(", ")));
+            for id in watched_ids {
+                params.push(Box::new(id));
+            }
+        }
     }
     
     if !where_clauses.is_empty() {
@@ -397,7 +444,15 @@ pub async fn search(
     }
     
     if request.exclude_watched {
-        where_clauses.push("NOT EXISTS (SELECT 1 FROM history h WHERE h.video_id = v.id)".to_string());
+        // Get watched video IDs from user_data.db (history table is now separate)
+        let watched_ids = state.db.get_all_watched_video_ids().unwrap_or_default();
+        if !watched_ids.is_empty() {
+            let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
+            where_clauses.push(format!("v.id NOT IN ({})", placeholders.join(", ")));
+            for id in watched_ids {
+                params.push(Box::new(id));
+            }
+        }
     }
     
     if !where_clauses.is_empty() {
@@ -757,10 +812,38 @@ pub async fn get_watched(
 pub async fn get_history(
     page: usize,
     page_size: usize,
+    sort_direction: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<HistoryResponse, String> {
     let total = state.db.get_history_count().map_err(|e| e.to_string())?;
-    let entries = state.db.get_history(page, page_size).map_err(|e| e.to_string())?;
+    let entries = state.db.get_history(page, page_size, sort_direction.as_deref()).map_err(|e| e.to_string())?;
+    
+    let results: Vec<Video> = entries.iter().map(|entry| Video {
+        id: entry.video_id.clone(),
+        title: entry.title.clone(),
+        thumbnail_url: entry.thumbnail_url.clone(),
+        watch_url: None,
+        view_count: 0,
+        comment_count: 0,
+        mylist_count: 0,
+        like_count: 0,
+        start_time: Some(entry.watched_at.clone()),
+        tags: vec![],
+        duration: None,
+        uploader_id: None,
+        uploader_name: None,
+        description: None,
+        is_watched: true,
+    }).collect();
+    
+    {
+        let mut state_results = state.history_results.write();
+        if page == 1 {
+            *state_results = results;
+        } else {
+            state_results.extend(results);
+        }
+    }
     
     let has_next = (page * page_size) < total;
     
@@ -1003,8 +1086,15 @@ pub async fn open_pip_window(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let playlist_type = *state.playlist_type.read();
     let current_index = *state.playlist_index.read();
-    let results = state.search_results.read();
+    
+    // Get results based on playlist type
+    let results = match playlist_type {
+        PlaylistType::Search => state.search_results.read().clone(),
+        PlaylistType::History => state.history_results.read().clone(),
+        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    };
     let current_video = results.get(current_index).cloned();
     
     let saved_state = crate::database::load_pip_window_state(&app);
@@ -1043,6 +1133,7 @@ pub async fn open_pip_window(
                 video,
                 index: current_index,
                 has_next,
+                playlist_type,
             }).map_err(|e| e.to_string())?;
         }
         
@@ -1079,6 +1170,7 @@ pub async fn open_pip_window(
                 video,
                 index: current_index,
                 has_next,
+                playlist_type,
             }).map_err(|e| e.to_string())?;
         }
         
@@ -1144,8 +1236,15 @@ pub async fn select_video(
 pub async fn play_next(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
+    let playlist_type = *state.playlist_type.read();
     let mut index = state.playlist_index.write();
-    let results = state.search_results.read();
+    
+    // Get results based on playlist type
+    let results = match playlist_type {
+        PlaylistType::Search => state.search_results.read().clone(),
+        PlaylistType::History => state.history_results.read().clone(),
+        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    };
     
     if *index + 1 < results.len() {
         *index += 1;
@@ -1159,11 +1258,17 @@ pub async fn play_next(
 pub async fn play_previous(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
+    let playlist_type = *state.playlist_type.read();
     let mut index = state.playlist_index.write();
     
     if *index > 0 {
         *index -= 1;
-        let results = state.search_results.read();
+        // Get results based on playlist type
+        let results = match playlist_type {
+            PlaylistType::Search => state.search_results.read().clone(),
+            PlaylistType::History => state.history_results.read().clone(),
+            PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+        };
         Ok(Some(results[*index].clone()))
     } else {
         Ok(None)
@@ -1208,4 +1313,345 @@ pub async fn load_pip_window_state(
     app: tauri::AppHandle,
 ) -> Result<Option<PipWindowState>, String> {
     Ok(crate::database::load_pip_window_state(&app))
+}
+
+
+// ===== Watch Later Commands =====
+
+#[tauri::command]
+pub async fn add_to_watch_later(
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    video_id: String,
+    title: String,
+    thumbnail_url: Option<String>,
+) -> Result<(), String> {
+    state.db.add_to_watch_later(&video_id, &title, thumbnail_url.as_deref())
+        .map_err(|e| e.to_string())?;
+    app.emit("watch-later-changed", video_id).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_from_watch_later(
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    video_id: String,
+) -> Result<(), String> {
+    state.db.remove_from_watch_later(&video_id).map_err(|e| e.to_string())?;
+    app.emit("watch-later-changed", video_id).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn is_in_watch_later(
+    state: tauri::State<'_, AppState>,
+    video_id: String,
+) -> Result<bool, String> {
+    state.db.is_in_watch_later(&video_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_watch_later(
+    state: tauri::State<'_, AppState>,
+    page: usize,
+    page_size: usize,
+    sort_direction: Option<String>,
+) -> Result<WatchLaterResponse, String> {
+    let total = state.db.get_watch_later_count().map_err(|e| e.to_string())?;
+    let entries = state.db.get_watch_later(page, page_size, sort_direction.as_deref()).map_err(|e| e.to_string())?;
+    
+    let results_for_state: Vec<Video> = entries.iter().map(|entry| Video {
+        id: entry.video_id.clone(),
+        title: entry.title.clone(),
+        thumbnail_url: entry.thumbnail_url.clone(),
+        watch_url: None,
+        view_count: 0,
+        comment_count: 0,
+        mylist_count: 0,
+        like_count: 0,
+        start_time: Some(entry.added_at.clone()),
+        tags: vec![],
+        duration: None,
+        uploader_id: None,
+        uploader_name: None,
+        description: None,
+        is_watched: false,
+    }).collect();
+    
+    {
+        let mut state_results = state.watch_later_results.write();
+        if page == 1 {
+            *state_results = results_for_state;
+        } else {
+            state_results.extend(results_for_state);
+        }
+    }
+    
+    let has_next = (page * page_size) < total;
+    
+    Ok(WatchLaterResponse {
+        total,
+        page,
+        page_size,
+        has_next,
+        results: entries,
+    })
+}
+
+#[tauri::command]
+pub async fn get_watch_later_count(
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    state.db.get_watch_later_count().map_err(|e| e.to_string())
+}
+
+// ===== State Management Commands =====
+
+#[tauri::command]
+pub async fn get_history_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<HistoryState, String> {
+    let history_state = state.history_state.read().clone();
+    Ok(history_state)
+}
+
+#[tauri::command]
+pub async fn set_history_state(
+    app: AppHandle,
+    history_state: HistoryState,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut current = state.history_state.write();
+        *current = history_state;
+    }
+    app.emit("history-state-changed", &state.history_state.read().clone()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_watch_later_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<WatchLaterState, String> {
+    let watch_later_state = state.watch_later_state.read().clone();
+    Ok(watch_later_state)
+}
+
+#[tauri::command]
+pub async fn set_watch_later_state(
+    app: AppHandle,
+    watch_later_state: WatchLaterState,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut current = state.watch_later_state.write();
+        *current = watch_later_state;
+    }
+    app.emit("watch-later-state-changed", &state.watch_later_state.read().clone()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_playlist_type(
+    state: tauri::State<'_, AppState>,
+    playlist_type: PlaylistType,
+) -> Result<(), String> {
+    let mut current = state.playlist_type.write();
+    *current = playlist_type;
+    Ok(())
+}
+
+
+// ===== Video Info Fetching =====
+
+#[tauri::command]
+pub async fn fetch_full_video_info(
+    video_id: String,
+) -> Result<Video, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("vocaloid-search-desktop/1.0")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    // Fetch getthumbinfo API for base metadata
+    let thumb_url = format!("https://ext.nicovideo.jp/api/getthumbinfo/{}", video_id);
+    let thumb_response = client
+        .get(&thumb_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch thumbinfo: {}", e))?;
+    let thumb_xml = thumb_response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read thumbinfo response: {}", e))?;
+
+    // Parse XML to extract video info
+    let thumb_info = parse_thumbinfo_xml(&thumb_xml, &video_id)?;
+
+    // Fetch like_count from snapshot API, but do not fail the whole request if snapshot is unavailable
+    let snapshot_url = format!(
+        "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search?q={}&fields=likeCounter&targets=contentId",
+        video_id
+    );
+    let like_count = match client.get(&snapshot_url).send().await {
+        Ok(snapshot_response) => {
+            #[derive(Debug, serde::Deserialize)]
+            struct SnapshotResponse {
+                data: Vec<SnapshotVideo>,
+            }
+
+            match snapshot_response.json::<SnapshotResponse>().await {
+                Ok(snapshot_data) => snapshot_data.data.first().and_then(|v| v.likeCounter).unwrap_or(0),
+                Err(e) => {
+                    eprintln!("[fetch_full_video_info] Failed to parse snapshot response for {}: {}", video_id, e);
+                    0
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[fetch_full_video_info] Failed to fetch snapshot for {}: {}", video_id, e);
+            0
+        }
+    };
+    
+    // Parse duration from MM:SS format
+    let duration = thumb_info.length.as_ref().and_then(|s| {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() == 2 {
+            let mins: i64 = parts[0].parse().ok()?;
+            let secs: i64 = parts[1].parse().ok()?;
+            Some(mins * 60 + secs)
+        } else {
+            None
+        }
+    });
+    
+    let video = Video {
+        id: thumb_info.id,
+        title: thumb_info.title,
+        thumbnail_url: thumb_info.thumbnail_url,
+        watch_url: Some(format!("https://www.nicovideo.jp/watch/{}", video_id)),
+        view_count: thumb_info.view_counter.unwrap_or(0),
+        comment_count: thumb_info.comment_num.unwrap_or(0),
+        mylist_count: thumb_info.mylist_counter.unwrap_or(0),
+        like_count,
+        start_time: thumb_info.first_retrieve,
+        tags: thumb_info.tags.unwrap_or_default(),
+        duration,
+        uploader_id: thumb_info.user_id,
+        uploader_name: thumb_info.user_nickname,
+        description: thumb_info.description,
+        is_watched: false,
+    };
+    
+    eprintln!(
+        "[fetch_full_video_info] {} -> title={:?}, start_time={:?}, uploader_id={:?}, uploader_name={:?}, view_count={}, tags={}, has_description={}",
+        video_id,
+        video.title,
+        video.start_time,
+        video.uploader_id,
+        video.uploader_name,
+        video.view_count,
+        video.tags.len(),
+        video.description.is_some()
+    );
+    
+    Ok(video)
+}
+
+fn parse_thumbinfo_xml(xml: &str, video_id: &str) -> Result<ThumbInfo, String> {
+    if let Some(error_code) = extract_xml_tag(xml, "code") {
+        let error_description = extract_xml_tag(xml, "description")
+            .unwrap_or_else(|| "Video not found or deleted".to_string());
+        return Err(format!("getthumbinfo error ({}): {}", error_code, error_description));
+    }
+
+    let thumb_start = xml.find("<thumb>").ok_or_else(|| {
+        let preview = xml.chars().take(200).collect::<String>();
+        format!("Invalid getthumbinfo response for {}: {}", video_id, preview)
+    })?;
+    let thumb_end = xml.find("</thumb>").ok_or_else(|| {
+        let preview = xml.chars().take(200).collect::<String>();
+        format!("Invalid getthumbinfo response for {}: {}", video_id, preview)
+    })?;
+    let thumb_xml = &xml[thumb_start..thumb_end + "</thumb>".len()];
+
+    let title = extract_xml_tag(thumb_xml, "title").ok_or_else(|| "Video not found or deleted".to_string())?;
+
+    Ok(ThumbInfo {
+        id: video_id.to_string(),
+        title,
+        description: extract_xml_tag(thumb_xml, "description"),
+        thumbnail_url: extract_xml_tag(thumb_xml, "thumbnail_url"),
+        first_retrieve: extract_xml_tag(thumb_xml, "first_retrieve"),
+        length: extract_xml_tag(thumb_xml, "length"),
+        view_counter: extract_xml_tag(thumb_xml, "view_counter").and_then(|s| s.parse().ok()),
+        comment_num: extract_xml_tag(thumb_xml, "comment_num").and_then(|s| s.parse().ok()),
+        mylist_counter: extract_xml_tag(thumb_xml, "mylist_counter").and_then(|s| s.parse().ok()),
+        tags: Some(extract_xml_tags(thumb_xml)),
+        user_id: extract_xml_tag(thumb_xml, "user_id"),
+        user_nickname: extract_xml_tag(thumb_xml, "user_nickname"),
+    })
+}
+
+fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let start_tag = format!("<{tag}>");
+    let end_tag = format!("</{tag}>");
+    let start = xml.find(&start_tag)? + start_tag.len();
+    let end = xml[start..].find(&end_tag)? + start;
+    let value = &xml[start..end];
+    quick_xml::escape::unescape(value).ok().map(|v| v.into_owned())
+}
+
+fn extract_xml_tags(xml: &str) -> Vec<String> {
+    let tags_start = match xml.find("<tags") {
+        Some(i) => i,
+        None => return Vec::new(),
+    };
+    let tags_open_end = match xml[tags_start..].find('>') {
+        Some(i) => tags_start + i + 1,
+        None => return Vec::new(),
+    };
+    let tags_end = match xml[tags_open_end..].find("</tags>") {
+        Some(i) => tags_open_end + i,
+        None => return Vec::new(),
+    };
+    let body = &xml[tags_open_end..tags_end];
+    let mut out = Vec::new();
+    let mut rest = body;
+
+    while let Some(start) = rest.find("<tag") {
+        let after_open = match rest[start..].find('>') {
+            Some(i) => start + i + 1,
+            None => break,
+        };
+        let close = match rest[after_open..].find("</tag>") {
+            Some(i) => after_open + i,
+            None => break,
+        };
+        let value = &rest[after_open..close];
+        if let Ok(unescaped) = quick_xml::escape::unescape(value) {
+            out.push(unescaped.into_owned());
+        }
+        rest = &rest[close + "</tag>".len()..];
+    }
+
+    out
+}
+
+struct ThumbInfo {
+    id: String,
+    title: String,
+    description: Option<String>,
+    thumbnail_url: Option<String>,
+    first_retrieve: Option<String>,
+    length: Option<String>,
+    view_counter: Option<i64>,
+    comment_num: Option<i64>,
+    mylist_counter: Option<i64>,
+    tags: Option<Vec<String>>,
+    user_id: Option<String>,
+    user_nickname: Option<String>,
 }

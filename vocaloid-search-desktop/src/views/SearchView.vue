@@ -3,7 +3,8 @@ import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type Filters, type UserInfo, type VideoSelectedPayload, type PlaybackSettings, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
+import { api, type Video, type Filters, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
+import PlayerColumn from '../components/PlayerColumn.vue'
 
 const { t } = useI18n()
 
@@ -22,15 +23,6 @@ const loadingMore = ref(false)
 
 const currentVideo = ref<Video | null>(null)
 const currentVideoIndex = ref(-1)
-const currentUserInfo = ref<UserInfo | null>(null)
-const iframeRef = ref<HTMLIFrameElement | null>(null)
-const isPlaying = ref(false)
-const playerReady = ref(false)
-const hasMarkedCurrent = ref(false)
-const autoPlay = ref(localStorage.getItem('vocaloidAutoPlay') !== 'false')
-const autoSkip = ref(localStorage.getItem('vocaloidAutoSkip') === 'true')
-const skipThreshold = ref(parseInt(localStorage.getItem('vocaloidSkipThreshold') || '30', 10))
-const descriptionExpanded = ref(false)
 
 const sortField = ref('start_time')
 const sortOrder = ref('desc')
@@ -236,44 +228,16 @@ async function playVideo(video: Video) {
     await api.setPlaylistIndex(index)
     currentVideoIndex.value = index
     currentVideo.value = video
-    currentUserInfo.value = userInfoCache.get(video.id) || null
-    hasMarkedCurrent.value = false
-    playerReady.value = false
-    isPlaying.value = false
-    descriptionExpanded.value = false
     console.log('[playVideo] State updated, currentVideo set to:', video.id)
 
     if (!userInfoCache.has(video.id)) {
       api.getUserInfo(video.id).then(userInfo => {
         if (userInfo) {
           userInfoCache.set(video.id, userInfo)
-          if (currentVideo.value?.id === video.id) {
-            currentUserInfo.value = userInfo
-          }
         }
       })
     }
   }
-}
-
-function getCachedUserNickname(video: Video | null): string {
-  if (!video) return ''
-  if (video.id === currentVideo.value?.id && currentUserInfo.value?.user_nickname) {
-    return currentUserInfo.value.user_nickname
-  }
-  const cached = userInfoCache.get(video.id)
-  if (cached?.user_nickname) return cached.user_nickname
-  return video.uploader_name || video.uploader_id || ''
-}
-
-function getCachedUserIconUrl(video: Video | null): string | null {
-  if (!video) return null
-  if (video.id === currentVideo.value?.id && currentUserInfo.value?.user_icon_url) {
-    return currentUserInfo.value.user_icon_url
-  }
-  const cached = userInfoCache.get(video.id)
-  if (cached?.user_icon_url) return cached.user_icon_url
-  return getUploaderAvatarUrl(video.uploader_id)
 }
 
 async function playNext() {
@@ -305,16 +269,10 @@ async function playPrevious() {
   }
 }
 
-function sendCommand(command: string) {
-  iframeRef.value?.contentWindow?.postMessage(
-    { eventName: command, playerId: '1', sourceConnectorType: 1 },
-    'https://embed.nicovideo.jp'
-  )
-}
-
-function togglePlayPause() {
-  if (!playerReady.value) return
-  sendCommand(isPlaying.value ? 'pause' : 'play')
+function handleVideoWatched(video: Video) {
+  if (currentVideo.value?.id === video.id) {
+    currentVideo.value = video
+  }
 }
 
 async function openPip() {
@@ -335,61 +293,6 @@ async function openNicoPage(event: Event, video: Video) {
   event.stopPropagation()
   if (video.watch_url) {
     await open(video.watch_url)
-  }
-}
-
-function handleMessage(event: MessageEvent) {
-  if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
-  
-  const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-  console.log('[handleMessage] Received:', data.eventName, data)
-  
-  if (data.eventName === 'loadComplete') {
-    console.log('[handleMessage] Player loaded, autoPlay:', autoPlay.value)
-    playerReady.value = true
-    if (autoPlay.value) {
-      setTimeout(() => {
-        console.log('[handleMessage] Sending play command')
-        sendCommand('play')
-      }, 500)
-    }
-  }
-  
-  if (data.eventName === 'playerStatusChange' || data.eventName === 'statusChange') {
-    const status = data.data?.playerStatus
-    const statusNum = typeof status === 'string' ? parseInt(status, 10) : status
-    console.log('[handleMessage] Player status:', statusNum)
-    
-    if (statusNum === 2) {
-      isPlaying.value = true
-      if (currentVideo.value && !hasMarkedCurrent.value) {
-        api.markWatched(
-          currentVideo.value.id,
-          currentVideo.value.title,
-          currentVideo.value.thumbnail_url
-        )
-        currentVideo.value.is_watched = true
-        hasMarkedCurrent.value = true
-      }
-    } else if (statusNum === 3) {
-      isPlaying.value = false
-    } else if (statusNum === 4) {
-      isPlaying.value = false
-      if (autoPlay.value) {
-        playNext()
-      }
-    }
-  }
-  
-  if (data.eventName === 'playerMetadataChange') {
-    const currentTime = data.data?.currentTime
-    const duration = data.data?.duration
-    if (currentTime && duration && autoSkip.value) {
-      const remaining = duration - currentTime
-      if (remaining <= skipThreshold.value && currentTime > 10) {
-        playNext()
-      }
-    }
   }
 }
 
@@ -528,12 +431,11 @@ function setupObserver() {
 
 let unlistenPip: (() => void) | null = null
 let unlistenVideoSelected: (() => void) | null = null
-let unlistenPlaybackSettings: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
 
 onMounted(async () => {
+  await api.setPlaylistType('Search')
   loadSearchState()
-  window.addEventListener('message', handleMessage)
   document.addEventListener('click', handleSortClickOutside)
   setupObserver()
 
@@ -554,7 +456,6 @@ onMounted(async () => {
       // Restore current video if index is valid
       if (playlistState.index >= 0 && playlistState.index < playlistState.results.length) {
         currentVideo.value = playlistState.results[playlistState.index]
-        currentUserInfo.value = userInfoCache.get(currentVideo.value.id) || null
       }
       
       // Restore PiP active state
@@ -582,33 +483,40 @@ onMounted(async () => {
     console.log('[SearchView] Received video-selected event:', payload.video.id, 'index:', payload.index)
     currentVideo.value = payload.video
     currentVideoIndex.value = payload.index
-    currentUserInfo.value = userInfoCache.get(payload.video.id) || null
-    hasMarkedCurrent.value = false
-    playerReady.value = false
-    isPlaying.value = false
-    descriptionExpanded.value = false
 
-    // Scroll to keep 2 videos visible below current playing video
-    // Check if the video 2 positions below is visible
+    // Scroll logic: keep videos visible above and below
+    const videoElement = document.getElementById('video-' + payload.index)
+    const prevVideoElement = document.getElementById('video-' + (payload.index - 1))
     const nextNextVideoElement = document.getElementById('video-' + (payload.index + 2))
-    if (nextNextVideoElement) {
-      // There are at least 2 videos below, check if they're visible
-      const rect = nextNextVideoElement.getBoundingClientRect()
-      const listContainer = document.querySelector('.video-list')
-      if (listContainer) {
-        const containerRect = listContainer.getBoundingClientRect()
-        // If the 2nd video below is below the visible area, scroll
-        if (rect.bottom > containerRect.bottom) {
-          nextNextVideoElement.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const listContainer = document.querySelector('.video-list')
+    
+    if (listContainer) {
+      const containerRect = listContainer.getBoundingClientRect()
+      
+      // Check if we need to scroll up (previous video not visible)
+      if (prevVideoElement && payload.index > 0) {
+        const prevRect = prevVideoElement.getBoundingClientRect()
+        if (prevRect.top < containerRect.top) {
+          // Previous video is above visible area, scroll to show it
+          prevVideoElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
       }
-    } else {
-      // Less than 2 videos below, just scroll current into view
-      const videoElement = document.getElementById('video-' + payload.index)
-      if (videoElement) {
-        videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      
+      // Check if we need to scroll down (video 2 positions below not visible)
+      if (nextNextVideoElement) {
+        const nextNextRect = nextNextVideoElement.getBoundingClientRect()
+        if (nextNextRect.bottom > containerRect.bottom) {
+          nextNextVideoElement.scrollIntoView({ behavior: 'smooth', block: 'end' })
+        }
+      } else if (videoElement) {
+        // Less than 2 videos below, just scroll current into view
+        const videoRect = videoElement.getBoundingClientRect()
+        if (videoRect.bottom > containerRect.bottom || videoRect.top < containerRect.top) {
+          videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
       }
     }
+    
     // Preload more results when approaching end of list
     const remaining = results.value.length - payload.index - 1
     if (remaining <= 10 && hasNext.value && !loadingMore.value) {
@@ -620,19 +528,9 @@ onMounted(async () => {
       api.getUserInfo(payload.video.id).then(userInfo => {
         if (userInfo) {
           userInfoCache.set(payload.video.id, userInfo)
-          if (currentVideo.value?.id === payload.video.id) {
-            currentUserInfo.value = userInfo
-          }
         }
       })
     }
-  })
-
-  unlistenPlaybackSettings = await listen<PlaybackSettings>('playback-settings-changed', (event) => {
-    const settings = event.payload
-    autoPlay.value = settings.auto_play
-    autoSkip.value = settings.auto_skip
-    skipThreshold.value = settings.skip_threshold
   })
 
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
@@ -651,26 +549,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('message', handleMessage)
   document.removeEventListener('click', handleSortClickOutside)
   if (observer) observer.disconnect()
   if (unlistenPip) unlistenPip()
   if (unlistenVideoSelected) unlistenVideoSelected()
-  if (unlistenPlaybackSettings) unlistenPlaybackSettings()
   if (unlistenVideoWatched) unlistenVideoWatched()
-})
-
-watch(autoPlay, async (val) => {
-  localStorage.setItem('vocaloidAutoPlay', String(val))
-  await api.setPlaybackSettings({ auto_play: val, auto_skip: autoSkip.value, skip_threshold: skipThreshold.value })
-})
-watch(autoSkip, async (val) => {
-  localStorage.setItem('vocaloidAutoSkip', String(val))
-  await api.setPlaybackSettings({ auto_play: autoPlay.value, auto_skip: val, skip_threshold: skipThreshold.value })
-})
-watch(skipThreshold, async (val) => {
-  localStorage.setItem('vocaloidSkipThreshold', String(val))
-  await api.setPlaybackSettings({ auto_play: autoPlay.value, auto_skip: autoSkip.value, skip_threshold: val })
 })
 
 watch([
@@ -827,90 +710,20 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
       :class="{ dragging: isDragging }"
     ></div>
     
-    <div class="player-column">
-      <div v-if="pipActive" class="pip-placeholder">
-        <p>{{ t('player.pipActive') }}</p>
-        <button @click="closePip">{{ t('player.returnToMain') }}</button>
-      </div>
-      
-      <template v-else>
-        <div v-if="currentVideo" class="player-header">
-          <div class="header-row">
-            <h1 class="video-title">{{ currentVideo.title }}</h1>
-            <span class="upload-datetime">{{ formatDateTime(currentVideo.start_time) }}</span>
-          </div>
-          <div class="meta-row">
-            <div class="uploader-info" v-if="currentVideo.uploader_id">
-              <img v-if="getCachedUserIconUrl(currentVideo)" :src="getCachedUserIconUrl(currentVideo)!" class="avatar" />
-              <div v-else class="avatar default-avatar">👤</div>
-              <span class="user-name">{{ getCachedUserNickname(currentVideo) }}</span>
-            </div>
-            <div class="stats">
-              <span class="stat views">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat likes">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat mylists">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat comments">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
-            </div>
-          </div>
-        </div>
-        
-        <div class="video-container">
-          <div class="aspect-ratio-box">
-            <div v-if="!currentVideo" class="empty-player">
-              <span>{{ t('player.selectVideo') }}</span>
-            </div>
-            <iframe
-              v-else
-              ref="iframeRef"
-              :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
-              frameborder="0"
-              allow="autoplay; encrypted-media"
-              allowfullscreen
-            ></iframe>
-          </div>
-        </div>
-        
-        <div class="playback-controls">
-          <div class="main-bar">
-            <div class="media-actions">
-              <button class="icon-btn" :disabled="currentVideoIndex <= 0" @click="playPrevious">⏮</button>
-              <button class="icon-btn play-pause-btn" @click="togglePlayPause">
-                {{ isPlaying ? '⏸' : '▶' }}
-              </button>
-              <button class="icon-btn" :disabled="currentVideoIndex < 0 || (currentVideoIndex >= results.length - 1 && !hasNext)" @click="playNext">⏭</button>
-            </div>
-            <div class="auto-skip-controls">
-              <label class="toggle-label">
-                <input type="checkbox" v-model="autoSkip">
-                <span>{{ t('player.autoSkip') }}</span>
-              </label>
-              <div v-if="autoSkip" class="threshold-input">
-                <input type="number" v-model.number="skipThreshold" min="5" max="120" step="5">
-                <span>{{ t('player.seconds') }}</span>
-              </div>
-            </div>
-            <button class="icon-btn pip-btn" @click="openPip" :disabled="!currentVideo" title="PiP">📺</button>
-          </div>
-        </div>
-        
-        <div v-if="currentVideo" class="info-below-player">
-          <div v-if="currentVideo.tags?.length" class="tags-section">
-            <span class="tag" v-for="tag in currentVideo.tags.slice(0, 12)" :key="tag">{{ tag }}</span>
-            <span class="tag more" v-if="currentVideo.tags.length > 12">+{{ currentVideo.tags.length - 12 }}</span>
-          </div>
-          <div v-if="currentVideo.description" class="description-section">
-            <div class="description-content" :class="{ collapsed: !descriptionExpanded }" v-html="currentVideo.description"></div>
-            <button 
-              v-if="currentVideo.description.length > 200" 
-              class="expand-btn" 
-              @click="descriptionExpanded = !descriptionExpanded"
-            >
-              {{ descriptionExpanded ? t('player.collapse') : t('player.expand') }}
-            </button>
-          </div>
-        </div>
-      </template>
-    </div>
+    
+    <PlayerColumn
+      :current-video="currentVideo"
+      :current-video-index="currentVideoIndex"
+      :results-count="results.length"
+      :has-next="hasNext"
+      :pip-active="pipActive"
+      :show-auto-skip="true"
+      @play-next="playNext"
+      @play-previous="playPrevious"
+      @open-pip="openPip"
+      @close-pip="closePip"
+      @video-watched="handleVideoWatched"
+    />
     
     <!-- Advanced Filter Modal -->
     <div v-if="showAdvancedFilter" class="modal-backdrop" 

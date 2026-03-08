@@ -3,6 +3,7 @@
     "title": "VOCALOID Search",
     "search": "検索",
     "history": "履歴",
+    "watchLater": "後で見る",
     "scraper": "同期",
     "logout": "ログアウト",
     "lightMode": "ライトモード",
@@ -14,6 +15,7 @@
     "searching": "検索中...",
     "results": "{count}件の動画が見つかりました",
     "noResults": "結果がありません",
+    "noMore": "これ以上動画はありません",
     "loadMore": "もっと読み込む"
   },
   "filter": {
@@ -91,6 +93,22 @@
     "loadMore": "もっと読み込む",
     "watchedAt": "視聴日時",
     "videoNotFound": "動画情報を取得できません",
-    "fetchError": "動画情報の取得に失敗しました"
+    "fetchError": "動画情報の取得に失敗しました",
+    "videoDeletedHint": "この動画は削除された可能性があります",
+    "justNow": "たった今",
+    "minutesAgo": "{count}分前",
+    "hoursAgo": "{count}時間前",
+    "daysAgo": "{count}日前"
+  },
+  "watchLater": {
+    "title": "後で見る",
+    "videos": "件の動画",
+    "empty": "リストに動画がありません",
+    "loading": "読み込み中...",
+    "remove": "リストから削除",
+    "justNow": "たった今",
+    "minutesAgo": "{count}分前",
+    "hoursAgo": "{count}時間前",
+    "daysAgo": "{count}日前"
   }
 }

@@ -17,10 +17,20 @@ pub fn run() {
             let data_dir = database::get_data_dir(&app_handle);
             std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
             
-            let db_path = database::get_db_path(&app_handle);
-            database::init_db(&db_path).expect("Failed to initialize database");
+            let videos_db_path = database::get_videos_db_path(&app_handle);
+            let user_data_db_path = database::get_user_data_db_path(&app_handle);
             
-            let state = state::AppState::new(&db_path);
+            // Check for migration from single data.db to split databases
+            let old_db_path = data_dir.join("data.db");
+            if old_db_path.exists() && !videos_db_path.exists() {
+                // Migration: rename old data.db to videos.db, create new user_data.db
+                let _ = std::fs::rename(&old_db_path, &videos_db_path);
+                println!("Migrated data.db to videos.db");
+            }
+            
+            database::init_db(&videos_db_path, &user_data_db_path).expect("Failed to initialize database");
+            
+            let state = state::AppState::new(videos_db_path, user_data_db_path);
             app.manage(state);
             
             let window_state = database::load_window_state(&app_handle);
@@ -134,7 +144,7 @@ pub fn run() {
             
             Ok(())
         })
-    .invoke_handler(tauri::generate_handler![
+.invoke_handler(tauri::generate_handler![
         commands::search,
         commands::get_video,
         commands::get_user_info,
@@ -160,6 +170,7 @@ pub fn run() {
         commands::load_window_state,
         commands::get_playlist_state,
         commands::set_playlist_index,
+        commands::update_playlist_video,
         commands::get_playback_settings,
         commands::set_playback_settings,
         commands::get_search_state,
@@ -167,7 +178,21 @@ pub fn run() {
         commands::load_more,
         commands::save_pip_window_state,
         commands::load_pip_window_state,
+        // Watch Later commands
+        commands::add_to_watch_later,
+        commands::remove_from_watch_later,
+        commands::is_in_watch_later,
+        commands::get_watch_later,
+        commands::get_watch_later_count,
+        // History/WatchLater state commands
+        commands::get_history_state,
+        commands::set_history_state,
+        commands::get_watch_later_state,
+        commands::set_watch_later_state,
+        commands::set_playlist_type,
+        // Video info fetching
+        commands::fetch_full_video_info,
     ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
 }

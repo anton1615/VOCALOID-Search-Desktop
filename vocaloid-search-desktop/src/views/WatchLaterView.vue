@@ -44,7 +44,7 @@ function formatDateTime(dateStr: string | null): string {
   return `${year}/${month}/${day} ${hour}:${minute}`
 }
 
-function formatWatchedAt(dateStr: string): string {
+function formatAddedAt(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -52,27 +52,27 @@ function formatWatchedAt(dateStr: string): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
   
-  if (diffMins < 1) return t('history.justNow')
-  if (diffMins < 60) return t('history.minutesAgo', { count: diffMins })
-  if (diffHours < 24) return t('history.hoursAgo', { count: diffHours })
-  if (diffDays < 7) return t('history.daysAgo', { count: diffDays })
+  if (diffMins < 1) return t('watchLater.justNow')
+  if (diffMins < 60) return t('watchLater.minutesAgo', { count: diffMins })
+  if (diffHours < 24) return t('watchLater.hoursAgo', { count: diffHours })
+  if (diffDays < 7) return t('watchLater.daysAgo', { count: diffDays })
   return formatDateTime(dateStr)
 }
 
-async function loadHistory() {
+async function loadWatchLater() {
   loading.value = true
   try {
-    await api.setPlaylistType('History')
-    const response = await api.getHistory(page.value, pageSize.value, sortOrder.value)
+    await api.setPlaylistType('WatchLater')
+    const response = await api.getWatchLater(page.value, pageSize.value, sortOrder.value)
     
-    // Convert HistoryEntry to Video format
+    // Convert WatchLaterEntry to Video format
     results.value = response.results.map(entry => ({
       id: entry.video_id,
       title: entry.title,
       thumbnail_url: entry.thumbnail_url,
       watch_url: null,
-      is_watched: true,
-      start_time: entry.watched_at,
+      is_watched: false,
+      start_time: entry.added_at,
       duration: null,
       view_count: 0,
       like_count: 0,
@@ -87,7 +87,7 @@ async function loadHistory() {
     totalCount.value = response.total
     hasNext.value = response.has_next
   } catch (e) {
-    console.error('Failed to load history:', e)
+    console.error('Failed to load watch later:', e)
   } finally {
     loading.value = false
   }
@@ -98,14 +98,14 @@ async function loadMore() {
   loadingMore.value = true
   page.value++
   try {
-    const response = await api.getHistory(page.value, pageSize.value, sortOrder.value)
+    const response = await api.getWatchLater(page.value, pageSize.value, sortOrder.value)
     const newVideos = response.results.map(entry => ({
       id: entry.video_id,
       title: entry.title,
       thumbnail_url: entry.thumbnail_url,
       watch_url: null,
-      is_watched: true,
-      start_time: entry.watched_at,
+      is_watched: false,
+      start_time: entry.added_at,
       duration: null,
       view_count: 0,
       like_count: 0,
@@ -128,7 +128,7 @@ async function loadMore() {
 
 async function hydrateCurrentVideo(video: Video, index: number) {
   currentVideoIndex.value = index
-  console.log('[HistoryView] hydrateCurrentVideo start:', {
+  console.log('[WatchLaterView] hydrateCurrentVideo start:', {
     id: video.id,
     index,
     baseTitle: video.title,
@@ -142,7 +142,7 @@ async function hydrateCurrentVideo(video: Video, index: number) {
   
   try {
     const fullInfo = await api.fetchFullVideoInfo(video.id)
-    console.log('[HistoryView] hydrateCurrentVideo fullInfo:', {
+    console.log('[WatchLaterView] hydrateCurrentVideo fullInfo:', {
       id: fullInfo.id,
       title: fullInfo.title,
       startTime: fullInfo.start_time,
@@ -211,6 +211,20 @@ function closePip() {
   pipActive.value = false
 }
 
+async function removeFromList(videoId: string) {
+  try {
+    await api.removeFromWatchLater(videoId)
+    results.value = results.value.filter(v => v.id !== videoId)
+    totalCount.value--
+    if (currentVideo.value?.id === videoId) {
+      currentVideo.value = null
+      currentVideoIndex.value = -1
+    }
+  } catch (e) {
+    console.error('Failed to remove from watch later:', e)
+  }
+}
+
 // Resize divider
 function startDrag(_e: MouseEvent) {
   isDragging.value = true
@@ -251,30 +265,30 @@ function setupObserver() {
 
 // Event listeners
 let unlistenVideoSelected: (() => void) | null = null
-let unlistenVideoWatched: (() => void) | null = null
+let unlistenWatchLaterChanged: (() => void) | null = null
 
 onMounted(async () => {
-  await api.setPlaylistType('History')
+  await api.setPlaylistType('WatchLater')
   
   // Restore view state, but always reload fresh list from DB instead of trusting stale Rust playlist entries
   try {
     const playlistState = await api.getPlaylistState()
-    const historyState = await api.getHistoryState()
+    const watchLaterState = await api.getWatchLaterState()
     
-    page.value = historyState.page || 1
-    pageSize.value = historyState.page_size || 50
-    sortOrder.value = (historyState.sort_direction as 'desc' | 'asc') || 'desc'
-    searchQuery.value = historyState.search_query || ''
+    page.value = watchLaterState.page || 1
+    pageSize.value = watchLaterState.page_size || 50
+    sortOrder.value = (watchLaterState.sort_direction as 'desc' | 'asc') || 'desc'
+    searchQuery.value = watchLaterState.search_query || ''
     pipActive.value = playlistState.pip_active
     
-    await loadHistory()
+    await loadWatchLater()
     
-    if (playlistState.playlist_type === 'History' && playlistState.index >= 0 && playlistState.index < results.value.length) {
+    if (playlistState.playlist_type === 'WatchLater' && playlistState.index >= 0 && playlistState.index < results.value.length) {
       await hydrateCurrentVideo(results.value[playlistState.index], playlistState.index)
     }
   } catch (e) {
-    console.error('[HistoryView] Failed to restore state:', e)
-    await loadHistory()
+    console.error('[WatchLaterView] Failed to restore state:', e)
+    await loadWatchLater()
   }
   
   setupObserver()
@@ -316,34 +330,30 @@ onMounted(async () => {
     }
   })
   
-  unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', async (event) => {
-    const { video_id, is_watched } = event.payload
-    if (currentVideo.value?.id === video_id) {
-      currentVideo.value.is_watched = is_watched
-    }
+  unlistenWatchLaterChanged = await listen('watch-later-changed', () => {
+    loadWatchLater()
   })
 })
 
 onUnmounted(() => {
   if (observer) observer.disconnect()
   if (unlistenVideoSelected) unlistenVideoSelected()
-  if (unlistenVideoWatched) unlistenVideoWatched()
-  
+  if (unlistenWatchLaterChanged) unlistenWatchLaterChanged()
   // Save state to Rust
-  api.setHistoryState({
+  api.setWatchLaterState({
     page: page.value,
     page_size: pageSize.value,
     total_count: totalCount.value,
     has_next: hasNext.value,
     sort_direction: sortOrder.value,
     search_query: searchQuery.value
-  }).catch(e => console.error('[HistoryView] Failed to save state:', e))
+  }).catch(e => console.error('[WatchLaterView] Failed to save state:', e))
 })
 
 // Apply filters
 function applyFilters() {
   page.value = 1
-  loadHistory()
+  loadWatchLater()
 }
 
 // Toggle sort order
@@ -354,11 +364,11 @@ function toggleSortOrder() {
 </script>
 
 <template>
-  <div class="history-view" ref="viewRef">
+  <div class="watch-later-view" ref="viewRef">
     <div class="list-column" :style="{ width: `${listWidth}%`, minWidth: '320px', maxWidth: '60%' }">
       <div class="header">
-        <h2>📜 {{ t('history.title') }}</h2>
-        <span class="count">{{ totalCount.toLocaleString() }} {{ t('history.videos') }}</span>
+        <h2>❤️ {{ t('watchLater.title') }}</h2>
+        <span class="count">{{ totalCount.toLocaleString() }} {{ t('watchLater.videos') }}</span>
       </div>
       
       <div class="filter-bar">
@@ -376,16 +386,7 @@ function toggleSortOrder() {
         </div>
       </div>
       
-      <div v-if="loading && results.length === 0" class="loading-state">
-        <div class="spinner"></div>
-        <span>{{ t('history.loading') }}</span>
-      </div>
-      
-      <div v-else-if="results.length === 0" class="empty-state">
-        {{ t('history.empty') }}
-      </div>
-      
-      <div v-else class="video-list">
+      <div class="video-list">
         <div
           v-for="(video, idx) in results"
           :key="video.id"
@@ -402,7 +403,13 @@ function toggleSortOrder() {
             <div class="title-row">
               <h3 class="title">{{ video.title }}</h3>
             </div>
-            <div class="watched-at">{{ t('history.watchedAt') }} {{ formatWatchedAt(video.start_time || '') }}</div>
+            <div class="added-at">{{ formatAddedAt(video.start_time || '') }}</div>
+          </div>
+          
+          <div class="actions">
+            <button class="remove-btn" @click="removeFromList(video.id)" :title="t('watchLater.remove')">
+              ✕
+            </button>
           </div>
         </div>
         
@@ -436,7 +443,7 @@ function toggleSortOrder() {
 </template>
 
 <style scoped>
-.history-view {
+.watch-later-view {
   display: flex;
   height: 100%;
   background: var(--color-bg-primary);
@@ -506,29 +513,6 @@ function toggleSortOrder() {
   color: white;
 }
 
-.loading-state,
-.empty-state {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-  gap: var(--space-sm);
-}
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--color-border-subtle);
-  border-top-color: var(--color-accent-primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 .video-list {
   flex: 1;
   overflow-y: auto;
@@ -594,14 +578,53 @@ function toggleSortOrder() {
   overflow: hidden;
 }
 
-.watched-at {
+.added-at {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+}
+
+.remove-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.remove-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgb(239, 68, 68);
 }
 
 .scroll-trigger {
   padding: var(--space-md);
   text-align: center;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border-subtle);
+  border-top-color: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .end-message {
@@ -628,7 +651,6 @@ function toggleSortOrder() {
   min-width: 0;
   background: var(--color-bg-surface);
   overflow: hidden;
-  position: relative;
 }
 
 .pip-placeholder {

@@ -3,6 +3,7 @@
     "title": "VOCALOID Search",
     "search": "Search",
     "history": "History",
+    "watchLater": "Watch Later",
     "scraper": "Sync",
     "logout": "Logout",
     "lightMode": "Light Mode",
@@ -14,6 +15,7 @@
     "searching": "Searching...",
     "results": "Found {count} videos",
     "noResults": "No results",
+    "noMore": "No more videos",
     "loadMore": "Load More"
   },
   "filter": {
@@ -91,6 +93,22 @@
     "loadMore": "Load More",
     "watchedAt": "Watched at",
     "videoNotFound": "Unable to fetch video info",
-    "fetchError": "Failed to fetch video info"
+    "fetchError": "Failed to fetch video info",
+    "videoDeletedHint": "This video may have been deleted",
+    "justNow": "Just now",
+    "minutesAgo": "{count} min ago",
+    "hoursAgo": "{count} hours ago",
+    "daysAgo": "{count} days ago"
+  },
+  "watchLater": {
+    "title": "Watch Later",
+    "videos": "videos",
+    "empty": "No videos in list",
+    "loading": "Loading...",
+    "remove": "Remove from list",
+    "justNow": "Just now",
+    "minutesAgo": "{count} min ago",
+    "hoursAgo": "{count} hours ago",
+    "daysAgo": "{count} days ago"
   }
 }

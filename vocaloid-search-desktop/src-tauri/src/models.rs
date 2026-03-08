@@ -16,6 +16,26 @@ pub struct HistoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchLaterEntry {
+    pub video_id: String,
+    pub title: String,
+    pub thumbnail_url: Option<String>,
+    pub added_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum PlaylistType {
+    Search,
+    History,
+    WatchLater,
+}
+
+impl Default for PlaylistType {
+    fn default() -> Self {
+        PlaylistType::Search
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Video {
     pub id: String,
     pub title: String,
@@ -127,6 +147,34 @@ pub struct HistoryResponse {
     pub results: Vec<HistoryEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchLaterResponse {
+    pub total: usize,
+    pub page: usize,
+    pub page_size: usize,
+    pub has_next: bool,
+    pub results: Vec<WatchLaterEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HistoryState {
+    pub page: usize,
+    pub page_size: usize,
+    pub has_next: bool,
+    pub total_count: usize,
+    pub sort_direction: String,
+    pub search_query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WatchLaterState {
+    pub page: usize,
+    pub page_size: usize,
+    pub has_next: bool,
+    pub total_count: usize,
+    pub sort_direction: String,
+    pub search_query: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScraperConfig {
     #[serde(default = "default_query")]
@@ -197,6 +245,7 @@ impl Default for WindowState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistState {
+    pub playlist_type: PlaylistType,
     pub results: Vec<Video>,
     pub index: usize,
     pub has_next: bool,
@@ -228,6 +277,7 @@ pub struct VideoSelectedPayload {
     pub video: Video,
     pub index: usize,
     pub has_next: bool,
+    pub playlist_type: PlaylistType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
