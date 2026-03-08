@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod database;
 pub mod models;
+pub mod playback_settings_config;
 pub mod scraper;
 pub mod state;
 

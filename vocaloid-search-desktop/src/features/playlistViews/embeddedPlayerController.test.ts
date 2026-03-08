@@ -57,7 +57,7 @@ describe('createEmbeddedPlayerController', () => {
     expect(onMarkWatched).toHaveBeenCalledWith(video)
   })
 
-  test('ended status triggers playNext only when autoplay is enabled', () => {
+  test('ended status does not advance to next video when auto-skip is disabled', () => {
     const onPlayNext = vi.fn()
     const controller = createEmbeddedPlayerController({
       sendCommand: vi.fn(),
@@ -68,11 +68,7 @@ describe('createEmbeddedPlayerController', () => {
 
     controller.setPlaybackSettings({ autoPlay: true, autoSkip: false, skipThreshold: 30 })
     controller.handlePlayerEvent({ eventName: 'playerStatusChange', data: { playerStatus: 4 } })
-    expect(onPlayNext).toHaveBeenCalledTimes(1)
 
-    onPlayNext.mockReset()
-    controller.setPlaybackSettings({ autoPlay: false, autoSkip: false, skipThreshold: 30 })
-    controller.handlePlayerEvent({ eventName: 'playerStatusChange', data: { playerStatus: 4 } })
     expect(onPlayNext).not.toHaveBeenCalled()
   })
 
@@ -92,5 +88,43 @@ describe('createEmbeddedPlayerController', () => {
     })
 
     expect(onPlayNext).toHaveBeenCalledTimes(1)
+  })
+
+  test('ended status stays on the current video when both autoplay and auto-skip are disabled', () => {
+    const onPlayNext = vi.fn()
+    const controller = createEmbeddedPlayerController({
+      sendCommand: vi.fn(),
+      onPlayNext,
+      onMarkWatched: vi.fn(),
+      schedule: vi.fn(),
+    })
+
+    controller.setPlaybackSettings({ autoPlay: false, autoSkip: false, skipThreshold: 30 })
+    controller.handlePlayerEvent({ eventName: 'playerStatusChange', data: { playerStatus: 4 } })
+
+    expect(onPlayNext).not.toHaveBeenCalled()
+  })
+
+  test('loadComplete after auto-skip leaves next video paused when autoplay is disabled', () => {
+    const sendCommand = vi.fn()
+    const onPlayNext = vi.fn()
+    const schedule = vi.fn((cb: () => void) => cb())
+    const controller = createEmbeddedPlayerController({
+      sendCommand,
+      onPlayNext,
+      onMarkWatched: vi.fn(),
+      schedule,
+    })
+
+    controller.setPlaybackSettings({ autoPlay: false, autoSkip: true, skipThreshold: 30 })
+    controller.handlePlayerEvent({
+      eventName: 'playerMetadataChange',
+      data: { currentTime: 100, duration: 120 },
+    })
+    controller.handlePlayerEvent({ eventName: 'loadComplete' })
+
+    expect(onPlayNext).toHaveBeenCalledTimes(1)
+    expect(schedule).not.toHaveBeenCalled()
+    expect(sendCommand).not.toHaveBeenCalled()
   })
 })

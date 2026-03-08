@@ -52,7 +52,8 @@
   "player": {
     "selectVideo": "Select a video from the list",
     "autoPlay": "Auto Play",
-    "autoSkip": "Auto Skip",
+    "autoSkip": "Auto Skip Ending",
+    "playbackSettings": "Playback Settings",
     "seconds": "sec",
     "previous": "Previous",
     "next": "Next",

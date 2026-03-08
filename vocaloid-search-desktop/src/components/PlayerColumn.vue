@@ -8,6 +8,12 @@ import VideoMetaPanel from './VideoMetaPanel.vue'
 import { formatDateTime } from '../utils/dateTime'
 import { createEmbeddedPlayerController } from '../features/playlistViews/embeddedPlayerController'
 import { getPlayerColumnLayout } from '../features/playlistViews/playerColumnLayout'
+import {
+  createMainWindowPlaybackSettingsViewModel,
+  updatePlaybackSettings,
+} from '../features/playlistViews/playerPlaybackSettings'
+import { resolvePlayerCommandTarget } from '../features/playlistViews/playerCommandTarget'
+import { clearPlayerMessageSource, rememberPlayerMessageSource, type PostMessageTarget } from '../features/playlistViews/playerMessageSource'
 
 const props = withDefaults(defineProps<{
   currentVideo: Video | null
@@ -31,9 +37,12 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const iframeRef = ref<HTMLIFrameElement | null>(null)
+let lastPlayerMessageSource: PostMessageTarget | null = null
 const autoPlay = ref(localStorage.getItem('vocaloidAutoPlay') !== 'false')
 const autoSkip = ref(localStorage.getItem('vocaloidAutoSkip') === 'true')
 const skipThreshold = ref(parseInt(localStorage.getItem('vocaloidSkipThreshold') || '30', 10))
+const playbackSettingsOpen = ref(false)
+const syncingPlaybackSettings = ref(false)
 
 const playerController = createEmbeddedPlayerController({
   sendCommand: (command) => sendCommand(command),
@@ -51,10 +60,12 @@ const playerReady = ref(playerController.state.playerReady)
 const userInfoCache = ref(new Map<string, UserInfo>())
 const currentUserInfo = ref<UserInfo | null>(null)
 const layoutSections = computed(() => getPlayerColumnLayout())
+const playbackSettingsViewModel = computed(() => createMainWindowPlaybackSettingsViewModel(playbackSettingsOpen.value))
 
 // Watch for currentVideo changes to fetch user info and reset states
 watch(() => props.currentVideo, async (video, oldVideo) => {
   if (video?.id !== oldVideo?.id) {
+    lastPlayerMessageSource = clearPlayerMessageSource(lastPlayerMessageSource)
     playerController.setCurrentVideo(video ?? null)
     playerReady.value = playerController.state.playerReady
     isPlaying.value = playerController.state.isPlaying
@@ -99,7 +110,12 @@ function togglePlayPause() {
 }
 
 function sendCommand(command: string) {
-  iframeRef.value?.contentWindow?.postMessage(
+  const target = resolvePlayerCommandTarget({
+    lastMessageSource: lastPlayerMessageSource,
+    iframeWindow: iframeRef.value?.contentWindow ?? null,
+  })
+
+  target?.postMessage(
     {
       eventName: command,
       playerId: '1',
@@ -109,15 +125,50 @@ function sendCommand(command: string) {
   )
 }
 
-function handleMessage(event: MessageEvent) {
-  if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
-
-  const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-  playerController.setPlaybackSettings({
+function getControllerPlaybackSettings() {
+  return {
     autoPlay: autoPlay.value,
     autoSkip: props.showAutoSkip ? autoSkip.value : false,
     skipThreshold: skipThreshold.value,
+  }
+}
+
+async function persistPlaybackSettings(updates: Pick<PlaybackSettings, 'auto_play' | 'auto_skip'>) {
+  if (syncingPlaybackSettings.value) {
+    return
+  }
+
+  const nextSettings = updatePlaybackSettings(
+    {
+      autoPlay: autoPlay.value,
+      autoSkip: autoSkip.value,
+      skipThreshold: skipThreshold.value,
+    },
+    {
+      autoPlay: updates.auto_play,
+      autoSkip: updates.auto_skip,
+    },
+  )
+
+  await api.setPlaybackSettings({
+    auto_play: nextSettings.autoPlay,
+    auto_skip: nextSettings.autoSkip,
+    skip_threshold: nextSettings.skipThreshold,
   })
+}
+
+function togglePlaybackSettingsPanel() {
+  playbackSettingsOpen.value = !playbackSettingsOpen.value
+}
+
+function handleMessage(event: MessageEvent) {
+  if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
+
+  lastPlayerMessageSource = rememberPlayerMessageSource(event.source)
+
+  const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+  const controllerPlaybackSettings = getControllerPlaybackSettings()
+  playerController.setPlaybackSettings(controllerPlaybackSettings)
   playerController.handlePlayerEvent(data)
   playerReady.value = playerController.state.playerReady
   isPlaying.value = playerController.state.isPlaying
@@ -132,9 +183,12 @@ onMounted(async () => {
   
   unlistenPlaybackSettings = await listen<PlaybackSettings>('playback-settings-changed', (event) => {
     const settings = event.payload
+    syncingPlaybackSettings.value = true
     autoPlay.value = settings.auto_play
     autoSkip.value = settings.auto_skip
     skipThreshold.value = settings.skip_threshold
+    syncingPlaybackSettings.value = false
+    playerController.setPlaybackSettings(getControllerPlaybackSettings())
   })
   
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
@@ -146,14 +200,12 @@ onMounted(async () => {
   
   // Get initial playback settings
   const settings = await api.getPlaybackSettings()
+  syncingPlaybackSettings.value = true
   autoPlay.value = settings.auto_play
   autoSkip.value = settings.auto_skip
   skipThreshold.value = settings.skip_threshold
-  playerController.setPlaybackSettings({
-    autoPlay: autoPlay.value,
-    autoSkip: props.showAutoSkip ? autoSkip.value : false,
-    skipThreshold: skipThreshold.value,
-  })
+  syncingPlaybackSettings.value = false
+  playerController.setPlaybackSettings(getControllerPlaybackSettings())
 })
 
 onUnmounted(() => {
@@ -163,8 +215,18 @@ onUnmounted(() => {
 })
 
 // Save settings to localStorage when changed
-watch(autoSkip, (val) => {
+watch(autoPlay, async (val, oldVal) => {
+  localStorage.setItem('vocaloidAutoPlay', val.toString())
+  if (oldVal !== undefined && val !== oldVal) {
+    await persistPlaybackSettings({ auto_play: val, auto_skip: autoSkip.value })
+  }
+})
+
+watch(autoSkip, async (val, oldVal) => {
   localStorage.setItem('vocaloidAutoSkip', val.toString())
+  if (oldVal !== undefined && val !== oldVal) {
+    await persistPlaybackSettings({ auto_play: autoPlay.value, auto_skip: val })
+  }
 })
 
 watch(skipThreshold, (val) => {
@@ -228,19 +290,32 @@ watch(skipThreshold, (val) => {
               <button class="icon-btn" :disabled="currentVideoIndex < 0 || (currentVideoIndex >= resultsCount - 1 && !hasNext)" @click="$emit('playNext')">⏭</button>
             </div>
 
-            <!-- Auto-skip controls -->
-            <div v-if="showAutoSkip" class="auto-skip-controls">
-              <label class="toggle-label">
-                <input type="checkbox" v-model="autoSkip">
-                <span>{{ t('player.autoSkip') }}</span>
-              </label>
-              <div v-if="autoSkip" class="threshold-input">
-                <input type="number" v-model.number="skipThreshold" min="5" max="120" step="5">
-                <span>{{ t('player.seconds') }}</span>
-              </div>
+            <div v-if="showAutoSkip" class="playback-settings-slot">
+              <button
+                class="icon-btn settings-btn"
+                type="button"
+                :title="t('player.playbackSettings')"
+                :aria-label="t('player.playbackSettings')"
+                :aria-expanded="playbackSettingsViewModel.panelOpen"
+                @click="togglePlaybackSettingsPanel"
+              >⚙</button>
             </div>
 
             <button class="icon-btn pip-btn" @click="$emit('openPip')" :disabled="!currentVideo" title="PiP">📺</button>
+          </div>
+
+          <div
+            v-if="showAutoSkip && playbackSettingsViewModel.panelOpen"
+            class="playback-settings-panel"
+          >
+            <label class="toggle-label">
+              <input v-model="autoPlay" type="checkbox">
+              <span>{{ t('player.autoPlay') }}</span>
+            </label>
+            <label class="toggle-label">
+              <input v-model="autoSkip" type="checkbox">
+              <span>{{ t('player.autoSkip') }}</span>
+            </label>
           </div>
         </div>
       </template>
@@ -453,10 +528,21 @@ watch(skipThreshold, (val) => {
   color: var(--color-bg-primary);
 }
 
-.auto-skip-controls {
+.playback-settings-slot {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
+}
+
+.settings-btn {
+  font-size: 17px;
+}
+
+.playback-settings-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-lg);
+  padding: 0 var(--space-md) var(--space-md);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
@@ -472,22 +558,6 @@ watch(skipThreshold, (val) => {
   width: 16px;
   height: 16px;
   accent-color: var(--color-accent-primary);
-}
-
-.threshold-input {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.threshold-input input {
-  width: 50px;
-  padding: 4px 8px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border-subtle);
-  color: var(--color-text-primary);
-  border-radius: 4px;
-  font-size: var(--font-size-sm);
 }
 
 .pip-btn {

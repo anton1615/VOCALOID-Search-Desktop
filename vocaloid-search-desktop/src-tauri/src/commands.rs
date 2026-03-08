@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::models::*;
+use crate::playback_settings_config::{playback_settings_from_stored_config, stored_config_with_playback_settings};
 use crate::scraper::{Scraper, snapshot_to_db_row, check_snapshot_api_last_update};
 use crate::state::AppState;
 use async_channel;
@@ -103,23 +104,9 @@ pub async fn update_playlist_video(
 pub async fn get_playback_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<PlaybackSettings, String> {
-    let auto_play = *state.auto_play.read();
-    let auto_skip = *state.auto_skip.read();
-    let skip_threshold = *state.skip_threshold.read();
-    
-    Ok(PlaybackSettings {
-        auto_play,
-        auto_skip,
-        skip_threshold,
-    })
-}
+    let stored = state.db.get_config().map_err(|e| e.to_string())?;
+    let settings = playback_settings_from_stored_config(&stored);
 
-#[tauri::command]
-pub async fn set_playback_settings(
-    app: AppHandle,
-    settings: PlaybackSettings,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
     {
         let mut auto_play = state.auto_play.write();
         *auto_play = settings.auto_play;
@@ -132,9 +119,35 @@ pub async fn set_playback_settings(
         let mut skip_threshold = state.skip_threshold.write();
         *skip_threshold = settings.skip_threshold;
     }
-    
+
+    Ok(settings)
+}
+
+#[tauri::command]
+pub async fn set_playback_settings(
+    app: AppHandle,
+    settings: PlaybackSettings,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let stored = state.db.get_config().map_err(|e| e.to_string())?;
+    let next_config = stored_config_with_playback_settings(&stored, &settings);
+    state.db.save_config(&next_config).map_err(|e| e.to_string())?;
+
+    {
+        let mut auto_play = state.auto_play.write();
+        *auto_play = settings.auto_play;
+    }
+    {
+        let mut auto_skip = state.auto_skip.write();
+        *auto_skip = settings.auto_skip;
+    }
+    {
+        let mut skip_threshold = state.skip_threshold.write();
+        *skip_threshold = settings.skip_threshold;
+    }
+
     app.emit("playback-settings-changed", &settings).map_err(|e| e.to_string())?;
-    
+
     Ok(())
 }
 
@@ -879,11 +892,15 @@ pub async fn save_scraper_config(
     config: ScraperConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let current = state.db.get_config().map_err(|e| e.to_string())?;
     let stored = crate::database::StoredConfig {
         query: config.query.clone(),
         max_age_days: config.max_age_days,
         targets: config.targets.clone(),
         category_filter: config.category_filter.clone(),
+        auto_play: current.auto_play,
+        auto_skip: current.auto_skip,
+        skip_threshold: current.skip_threshold,
     };
     
     state.db.save_config(&stored).map_err(|e| e.to_string())?;

@@ -52,7 +52,8 @@
   "player": {
     "selectVideo": "リストから動画を選択",
     "autoPlay": "自動再生",
-    "autoSkip": "自動スキップ",
+    "autoSkip": "エンディングを自動スキップ",
+    "playbackSettings": "再生設定",
     "seconds": "秒",
     "previous": "前へ",
     "next": "次へ",

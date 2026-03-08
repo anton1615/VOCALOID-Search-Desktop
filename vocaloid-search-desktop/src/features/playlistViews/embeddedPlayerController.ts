@@ -68,7 +68,9 @@ export function createEmbeddedPlayerController({
       if (payload.eventName === 'loadComplete') {
         state.playerReady = true
         if (playbackSettings.autoPlay) {
-          schedule(() => sendCommand('play'))
+          schedule(() => {
+            sendCommand('play')
+          })
         }
         return
       }
@@ -93,9 +95,6 @@ export function createEmbeddedPlayerController({
 
         if (statusNum === 4) {
           state.isPlaying = false
-          if (playbackSettings.autoPlay) {
-            onPlayNext()
-          }
         }
         return
       }

@@ -87,6 +87,9 @@ pub struct StoredConfig {
     pub max_age_days: Option<i64>,
     pub targets: String,
     pub category_filter: Option<String>,
+    pub auto_play: bool,
+    pub auto_skip: bool,
+    pub skip_threshold: u32,
 }
 
 impl Default for StoredConfig {
@@ -96,6 +99,9 @@ impl Default for StoredConfig {
             max_age_days: Some(365),
             targets: "tags".to_string(),
             category_filter: Some("MUSIC".to_string()),
+            auto_play: true,
+            auto_skip: false,
+            skip_threshold: 30,
         }
     }
 }

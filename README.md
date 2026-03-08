@@ -247,6 +247,20 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.3.0 - Playback Settings Refinement
+
+**Highlights:**
+- Replaced the always-visible auto-skip checkbox in the main window with a gear-triggered playback settings panel
+- Exposed auto-play and ending auto-skip as two independent toggles
+- Kept the settings panel collapsed by default without persisting its open/closed UI state
+- Restored auto-play and auto-skip selections after app restart
+
+**Bug fixes:**
+- Fixed next-video transitions that failed to resume playback when auto-play was enabled
+- Fixed unstable cross-origin iframe message targeting that could prevent play commands from reaching the embed player
+- Fixed videos advancing to the next item on natural end even when auto-skip was disabled
+- Removed the user-facing skip-threshold input while preserving the internal threshold behavior
+
 ### v1.1.2 - Bug Fix
 
 **Bug Fixes:**
