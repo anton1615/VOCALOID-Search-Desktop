@@ -42,3 +42,6 @@ vocaloid-search-desktop/src-tauri/target/
 nul
 *.tmp
 *.temp
+
+# Git worktrees
+.worktrees/
