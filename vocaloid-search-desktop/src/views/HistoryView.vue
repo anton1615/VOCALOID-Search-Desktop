@@ -4,6 +4,10 @@ import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
 import PlayerColumn from '../components/PlayerColumn.vue'
+import { formatDateTime } from '../utils/dateTime'
+import { mapHistoryEntryToVideo } from '../utils/playlistPlaceholders'
+import { createHydratedCurrentVideo, getInitialPlaylistViewState } from '../features/playlistViews/playlistViewState'
+import { createPagedPlaylistController } from '../features/playlistViews/pagedPlaylistController'
 
 const { t } = useI18n()
 
@@ -33,15 +37,34 @@ const listWidth = ref(40)
 const isDragging = ref(false)
 const viewRef = ref<HTMLElement | null>(null)
 
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  const hour = date.getHours().toString().padStart(2, '0')
-  const minute = date.getMinutes().toString().padStart(2, '0')
-  return `${year}/${month}/${day} ${hour}:${minute}`
+const historyController = createPagedPlaylistController({
+  initialPage: page.value,
+  initialPageSize: pageSize.value,
+  initialSortOrder: sortOrder.value,
+  fetchPage: async (nextPage, nextPageSize, nextSortOrder) => {
+    const response = await api.getHistory(nextPage, nextPageSize, nextSortOrder)
+    return {
+      total: response.total,
+      has_next: response.has_next,
+      results: response.results.map(mapHistoryEntryToVideo),
+    }
+  },
+})
+
+function syncHistorySnapshot(snapshot: {
+  results: Video[]
+  totalCount: number
+  page: number
+  pageSize: number
+  hasNext: boolean
+  sortOrder: 'desc' | 'asc'
+}) {
+  results.value = snapshot.results
+  totalCount.value = snapshot.totalCount
+  page.value = snapshot.page
+  pageSize.value = snapshot.pageSize
+  hasNext.value = snapshot.hasNext
+  sortOrder.value = snapshot.sortOrder
 }
 
 function formatWatchedAt(dateStr: string): string {
@@ -63,29 +86,9 @@ async function loadHistory() {
   loading.value = true
   try {
     await api.setPlaylistType('History')
-    const response = await api.getHistory(page.value, pageSize.value, sortOrder.value)
-    
-    // Convert HistoryEntry to Video format
-    results.value = response.results.map(entry => ({
-      id: entry.video_id,
-      title: entry.title,
-      thumbnail_url: entry.thumbnail_url,
-      watch_url: null,
-      is_watched: true,
-      start_time: entry.watched_at,
-      duration: null,
-      view_count: 0,
-      like_count: 0,
-      mylist_count: 0,
-      comment_count: 0,
-      description: null,
-      tags: [],
-      uploader_id: null,
-      uploader_name: null,
-    }))
-    
-    totalCount.value = response.total
-    hasNext.value = response.has_next
+    historyController.setSortOrder(sortOrder.value)
+    const snapshot = await historyController.loadFirstPage()
+    syncHistorySnapshot(snapshot)
   } catch (e) {
     console.error('Failed to load history:', e)
   } finally {
@@ -96,31 +99,13 @@ async function loadHistory() {
 async function loadMore() {
   if (!hasNext.value || loadingMore.value) return
   loadingMore.value = true
-  page.value++
   try {
-    const response = await api.getHistory(page.value, pageSize.value, sortOrder.value)
-    const newVideos = response.results.map(entry => ({
-      id: entry.video_id,
-      title: entry.title,
-      thumbnail_url: entry.thumbnail_url,
-      watch_url: null,
-      is_watched: true,
-      start_time: entry.watched_at,
-      duration: null,
-      view_count: 0,
-      like_count: 0,
-      mylist_count: 0,
-      comment_count: 0,
-      description: null,
-      tags: [],
-      uploader_id: null,
-      uploader_name: null,
-    }))
-    results.value = [...results.value, ...newVideos]
-    hasNext.value = response.has_next
+    const snapshot = await historyController.loadNextPage()
+    if (snapshot) {
+      syncHistorySnapshot(snapshot)
+    }
   } catch (e) {
     console.error('Failed to load more:', e)
-    page.value--
   } finally {
     loadingMore.value = false
   }
@@ -167,10 +152,7 @@ async function hydrateCurrentVideo(video: Video, index: number) {
     console.error('Failed to fetch video info:', e)
   }
   
-  currentVideo.value = {
-    ...video,
-    start_time: null,
-  }
+  currentVideo.value = createHydratedCurrentVideo(video, null)
 }
 
 async function playVideo(video: Video, index: number) {
@@ -269,8 +251,15 @@ onMounted(async () => {
     
     await loadHistory()
     
-    if (playlistState.playlist_type === 'History' && playlistState.index >= 0 && playlistState.index < results.value.length) {
-      await hydrateCurrentVideo(results.value[playlistState.index], playlistState.index)
+    const initialViewState = getInitialPlaylistViewState({
+      expectedPlaylistType: 'History',
+      playlistType: playlistState.playlist_type,
+      playlistIndex: playlistState.index,
+      results: results.value,
+    })
+
+    if (initialViewState.selectedVideo && initialViewState.selectedIndex >= 0) {
+      await hydrateCurrentVideo(initialViewState.selectedVideo, initialViewState.selectedIndex)
     }
   } catch (e) {
     console.error('[HistoryView] Failed to restore state:', e)

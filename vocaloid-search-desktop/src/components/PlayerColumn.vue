@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type PlaybackSettings, getUploaderAvatarUrl } from '../api/tauri-commands'
 import WatchLaterButton from './WatchLaterButton.vue'
+import VideoMetaPanel from './VideoMetaPanel.vue'
+import { formatDateTime } from '../utils/dateTime'
+import { createEmbeddedPlayerController } from '../features/playlistViews/embeddedPlayerController'
+import { getPlayerColumnLayout } from '../features/playlistViews/playerColumnLayout'
 
 const props = withDefaults(defineProps<{
   currentVideo: Video | null
@@ -27,27 +31,35 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const iframeRef = ref<HTMLIFrameElement | null>(null)
-const isPlaying = ref(false)
-const playerReady = ref(false)
-const hasMarkedCurrent = ref(false)
 const autoPlay = ref(localStorage.getItem('vocaloidAutoPlay') !== 'false')
 const autoSkip = ref(localStorage.getItem('vocaloidAutoSkip') === 'true')
 const skipThreshold = ref(parseInt(localStorage.getItem('vocaloidSkipThreshold') || '30', 10))
-const descriptionExpanded = ref(false)
+
+const playerController = createEmbeddedPlayerController({
+  sendCommand: (command) => sendCommand(command),
+  onPlayNext: () => emit('playNext'),
+  onMarkWatched: (video) => {
+    api.markWatched(video.id, video.title, video.thumbnail_url)
+    emit('videoWatched', { ...video, is_watched: true })
+  },
+  schedule: (callback) => setTimeout(callback, 500),
+})
+
+const isPlaying = ref(playerController.state.isPlaying)
+const playerReady = ref(playerController.state.playerReady)
 
 const userInfoCache = ref(new Map<string, UserInfo>())
 const currentUserInfo = ref<UserInfo | null>(null)
+const layoutSections = computed(() => getPlayerColumnLayout())
 
 // Watch for currentVideo changes to fetch user info and reset states
 watch(() => props.currentVideo, async (video, oldVideo) => {
-  // Reset states when video changes
   if (video?.id !== oldVideo?.id) {
-    playerReady.value = false
-    isPlaying.value = false
-    hasMarkedCurrent.value = false
-    descriptionExpanded.value = false
+    playerController.setCurrentVideo(video ?? null)
+    playerReady.value = playerController.state.playerReady
+    isPlaying.value = playerController.state.isPlaying
   }
-  
+
   if (video?.uploader_id) {
     if (!userInfoCache.value.has(video.id)) {
       try {
@@ -64,17 +76,6 @@ watch(() => props.currentVideo, async (video, oldVideo) => {
     currentUserInfo.value = null
   }
 }, { immediate: true })
-
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  const hour = date.getHours().toString().padStart(2, '0')
-  const minute = date.getMinutes().toString().padStart(2, '0')
-  return `${year}/${month}/${day} ${hour}:${minute}`
-}
 
 function getUserNickname(): string {
   if (!props.currentVideo) return ''
@@ -112,49 +113,14 @@ function handleMessage(event: MessageEvent) {
   if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
 
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-
-  if (data.eventName === 'loadComplete') {
-    playerReady.value = true
-    if (autoPlay.value) {
-      setTimeout(() => sendCommand('play'), 500)
-    }
-  }
-
-  if (data.eventName === 'playerStatusChange' || data.eventName === 'statusChange') {
-    const status = data.data?.playerStatus
-    const statusNum = typeof status === 'string' ? parseInt(status, 10) : status
-
-    if (statusNum === 2) {
-      isPlaying.value = true
-      if (props.currentVideo && !hasMarkedCurrent.value) {
-        api.markWatched(
-          props.currentVideo.id,
-          props.currentVideo.title,
-          props.currentVideo.thumbnail_url
-        )
-        emit('videoWatched', { ...props.currentVideo, is_watched: true })
-        hasMarkedCurrent.value = true
-      }
-    } else if (statusNum === 3) {
-      isPlaying.value = false
-    } else if (statusNum === 4) {
-      isPlaying.value = false
-      if (autoPlay.value) {
-        emit('playNext')
-      }
-    }
-  }
-
-  if (data.eventName === 'playerMetadataChange') {
-    const currentTime = data.data?.currentTime
-    const duration = data.data?.duration
-    if (currentTime && duration && autoSkip.value && props.showAutoSkip) {
-      const remaining = duration - currentTime
-      if (remaining <= skipThreshold.value && currentTime > 10) {
-        emit('playNext')
-      }
-    }
-  }
+  playerController.setPlaybackSettings({
+    autoPlay: autoPlay.value,
+    autoSkip: props.showAutoSkip ? autoSkip.value : false,
+    skipThreshold: skipThreshold.value,
+  })
+  playerController.handlePlayerEvent(data)
+  playerReady.value = playerController.state.playerReady
+  isPlaying.value = playerController.state.isPlaying
 }
 
 // Lifecycle
@@ -183,6 +149,11 @@ onMounted(async () => {
   autoPlay.value = settings.auto_play
   autoSkip.value = settings.auto_skip
   skipThreshold.value = settings.skip_threshold
+  playerController.setPlaybackSettings({
+    autoPlay: autoPlay.value,
+    autoSkip: props.showAutoSkip ? autoSkip.value : false,
+    skipThreshold: skipThreshold.value,
+  })
 })
 
 onUnmounted(() => {
@@ -210,95 +181,69 @@ watch(skipThreshold, (val) => {
     </div>
     
     <template v-else>
-      <!-- Player Header -->
-      <div v-if="currentVideo" class="player-header">
-        <div class="header-row">
-          <h1 class="video-title">{{ currentVideo.title }}</h1>
-          <span class="upload-datetime">{{ formatDateTime(currentVideo.start_time) }}</span>
-        </div>
-        <div class="meta-row">
-          <div class="uploader-info" v-if="currentVideo.uploader_id || currentVideo.uploader_name">
-            <img v-if="getUserIconUrl()" :src="getUserIconUrl()!" class="avatar" />
-            <div v-else class="avatar default-avatar">👤</div>
-            <span class="user-name">{{ getUserNickname() }}</span>
-          </div>
-          <div v-else class="uploader-info-placeholder"></div>
-          <div class="stats">
-            <span class="stat views">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
-            <span class="stat likes">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
-            <span class="stat mylists">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
-            <span class="stat comments">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Video Container -->
-      <div class="video-container">
-        <div class="aspect-ratio-box">
-          <div v-if="!currentVideo" class="empty-player">
-            <span>{{ t('player.selectVideo') }}</span>
-          </div>
-          <iframe
-            v-else
-            ref="iframeRef"
-            :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
-            frameborder="0"
-            allow="autoplay; encrypted-media"
-            allowfullscreen
-          ></iframe>
-        </div>
-      </div>
-      
-      <!-- Playback Controls -->
-      <div class="playback-controls">
-        <div class="main-bar">
-          <div class="media-actions">
-            <WatchLaterButton 
-              :video-id="currentVideo?.id || null"
-              :video-title="currentVideo?.title"
-              :thumbnail-url="currentVideo?.thumbnail_url"
-              :disabled="!currentVideo"
-            />
-            <button class="icon-btn" :disabled="currentVideoIndex <= 0" @click="$emit('playPrevious')">⏮</button>
-            <button class="icon-btn play-pause-btn" @click="togglePlayPause">
-              {{ isPlaying ? '⏸' : '▶' }}
-            </button>
-            <button class="icon-btn" :disabled="currentVideoIndex < 0 || (currentVideoIndex >= resultsCount - 1 && !hasNext)" @click="$emit('playNext')">⏭</button>
-          </div>
-          
-          <!-- Auto-skip controls -->
-          <div v-if="showAutoSkip" class="auto-skip-controls">
-            <label class="toggle-label">
-              <input type="checkbox" v-model="autoSkip">
-              <span>{{ t('player.autoSkip') }}</span>
-            </label>
-            <div v-if="autoSkip" class="threshold-input">
-              <input type="number" v-model.number="skipThreshold" min="5" max="120" step="5">
-              <span>{{ t('player.seconds') }}</span>
+      <template v-for="section in layoutSections" :key="section.section">
+        <VideoMetaPanel
+          v-if="currentVideo && (section.section === 'header' || section.section === 'details')"
+          :video="currentVideo"
+          :uploader-name="getUserNickname()"
+          :uploader-icon-url="getUserIconUrl()"
+          :upload-date-time="formatDateTime(currentVideo.start_time)"
+          :collapse-label="t('player.collapse')"
+          :expand-label="t('player.expand')"
+          :show-uploader-placeholder="true"
+          :display-mode="section.videoMetaPanelMode"
+        />
+
+        <!-- Video Container -->
+        <div v-else-if="section.section === 'player'" class="video-container">
+          <div class="aspect-ratio-box">
+            <div v-if="!currentVideo" class="empty-player">
+              <span>{{ t('player.selectVideo') }}</span>
             </div>
+            <iframe
+              v-else
+              ref="iframeRef"
+              :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
+              frameborder="0"
+              allow="autoplay; encrypted-media"
+              allowfullscreen
+            ></iframe>
           </div>
-          
-          <button class="icon-btn pip-btn" @click="$emit('openPip')" :disabled="!currentVideo" title="PiP">📺</button>
         </div>
-      </div>
-      
-      <!-- Info Below Player -->
-      <div v-if="currentVideo" class="info-below-player">
-        <div v-if="currentVideo.tags?.length" class="tags-section">
-          <span class="tag" v-for="tag in currentVideo.tags.slice(0, 12)" :key="tag">{{ tag }}</span>
-          <span class="tag more" v-if="currentVideo.tags.length > 12">+{{ currentVideo.tags.length - 12 }}</span>
+
+        <!-- Playback Controls -->
+        <div v-else-if="section.section === 'controls'" class="playback-controls">
+          <div class="main-bar">
+            <div class="media-actions">
+              <WatchLaterButton
+                :video-id="currentVideo?.id || null"
+                :video-title="currentVideo?.title"
+                :thumbnail-url="currentVideo?.thumbnail_url"
+                :disabled="!currentVideo"
+              />
+              <button class="icon-btn" :disabled="currentVideoIndex <= 0" @click="$emit('playPrevious')">⏮</button>
+              <button class="icon-btn play-pause-btn" @click="togglePlayPause">
+                {{ isPlaying ? '⏸' : '▶' }}
+              </button>
+              <button class="icon-btn" :disabled="currentVideoIndex < 0 || (currentVideoIndex >= resultsCount - 1 && !hasNext)" @click="$emit('playNext')">⏭</button>
+            </div>
+
+            <!-- Auto-skip controls -->
+            <div v-if="showAutoSkip" class="auto-skip-controls">
+              <label class="toggle-label">
+                <input type="checkbox" v-model="autoSkip">
+                <span>{{ t('player.autoSkip') }}</span>
+              </label>
+              <div v-if="autoSkip" class="threshold-input">
+                <input type="number" v-model.number="skipThreshold" min="5" max="120" step="5">
+                <span>{{ t('player.seconds') }}</span>
+              </div>
+            </div>
+
+            <button class="icon-btn pip-btn" @click="$emit('openPip')" :disabled="!currentVideo" title="PiP">📺</button>
+          </div>
         </div>
-        <div v-if="currentVideo.description" class="description-section">
-          <div class="description-content" :class="{ collapsed: !descriptionExpanded }" v-html="currentVideo.description"></div>
-          <button 
-            v-if="currentVideo.description.length > 200" 
-            class="expand-btn" 
-            @click="descriptionExpanded = !descriptionExpanded"
-          >
-            {{ descriptionExpanded ? t('player.collapse') : t('player.expand') }}
-          </button>
-        </div>
-      </div>
+      </template>
     </template>
   </div>
 </template>

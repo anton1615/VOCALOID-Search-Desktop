@@ -4,20 +4,38 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { api, type Video, type VideoSelectedPayload, type PlaybackSettings, type UserInfo, getUploaderAvatarUrl } from './api/tauri-commands'
 import WatchLaterButton from './components/WatchLaterButton.vue'
+import VideoMetaPanel from './components/VideoMetaPanel.vue'
+import { formatDateTime } from './utils/dateTime'
+import { createEmbeddedPlayerController } from './features/playlistViews/embeddedPlayerController'
+import { getPipLayout } from './features/playlistViews/pipLayout'
 const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
 const hasNext = ref(false)
 const iframeRef = ref<HTMLIFrameElement | null>(null)
-const isPlaying = ref(false)
-const playerReady = ref(false)
-const hasMarkedCurrent = ref(false)
 const autoPlay = ref(true)
 const autoSkip = ref(false)
 const skipThreshold = ref(30)
-const descriptionExpanded = ref(false)
+
+const playerController = createEmbeddedPlayerController({
+  sendCommand: (command) => sendCommand(command),
+  onPlayNext: () => {
+    void playNext()
+  },
+  onMarkWatched: (video) => {
+    void api.markWatched(video.id, video.title, video.thumbnail_url)
+    if (currentVideo.value?.id === video.id) {
+      currentVideo.value.is_watched = true
+    }
+  },
+  schedule: (callback) => setTimeout(callback, 500),
+})
+
+const isPlaying = ref(playerController.state.isPlaying)
+const playerReady = ref(playerController.state.playerReady)
 
 const userInfoCache = reactive(new Map<string, UserInfo>())
 const currentUserInfo = ref<UserInfo | null>(null)
+const pipLayout = getPipLayout()
 
 const pipWindow = getCurrentWindow()
 let isClosing = false
@@ -35,12 +53,6 @@ async function saveWindowState() {
   } catch (e) {
     console.error('Failed to save pip window state:', e)
   }
-}
-
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
 }
 
 function getCachedUserNickname(video: Video | null): string {
@@ -153,12 +165,13 @@ async function fetchUserInfo(video: Video) {
 
 async function handleVideoChange(video: Video, index: number, hasNextVideo: boolean) {
   console.log('[PiP] handleVideoChange called:', video.id, 'index:', index)
-  hasMarkedCurrent.value = false
   currentVideo.value = video
   currentIndex.value = index
   hasNext.value = hasNextVideo
-  descriptionExpanded.value = false
   currentUserInfo.value = null
+  playerController.setCurrentVideo(video)
+  playerReady.value = playerController.state.playerReady
+  isPlaying.value = playerController.state.isPlaying
 
   await fetchUserInfo(video)
   console.log('[PiP] Calling loadPlayer with:', video.id)
@@ -169,49 +182,14 @@ function handleMessage(event: MessageEvent) {
   if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
 
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-
-  if (data.eventName === 'loadComplete') {
-    playerReady.value = true
-    if (autoPlay.value) {
-      setTimeout(() => sendCommand('play'), 500)
-    }
-  }
-
-  if (data.eventName === 'playerStatusChange' || data.eventName === 'statusChange') {
-    const status = data.data?.playerStatus
-    const statusNum = typeof status === 'string' ? parseInt(status, 10) : status
-
-    if (statusNum === 2) {
-      isPlaying.value = true
-      if (currentVideo.value && !hasMarkedCurrent.value) {
-        api.markWatched(
-          currentVideo.value.id,
-          currentVideo.value.title,
-          currentVideo.value.thumbnail_url
-        )
-        currentVideo.value.is_watched = true
-        hasMarkedCurrent.value = true
-      }
-    } else if (statusNum === 3) {
-      isPlaying.value = false
-    } else if (statusNum === 4) {
-      isPlaying.value = false
-      if (autoPlay.value) {
-        playNext()
-      }
-    }
-  }
-
-  if (data.eventName === 'playerMetadataChange') {
-    const currentTime = data.data?.currentTime
-    const duration = data.data?.duration
-    if (currentTime && duration && autoSkip.value) {
-      const remaining = duration - currentTime
-      if (remaining <= skipThreshold.value && currentTime > 10) {
-        playNext()
-      }
-    }
-  }
+  playerController.setPlaybackSettings({
+    autoPlay: autoPlay.value,
+    autoSkip: autoSkip.value,
+    skipThreshold: skipThreshold.value,
+  })
+  playerController.handlePlayerEvent(data)
+  playerReady.value = playerController.state.playerReady
+  isPlaying.value = playerController.state.isPlaying
 }
 
 let unlistenVideoSelected: (() => void) | null = null
@@ -236,6 +214,11 @@ onMounted(async () => {
   autoPlay.value = settings.auto_play
   autoSkip.value = settings.auto_skip
   skipThreshold.value = settings.skip_threshold
+  playerController.setPlaybackSettings({
+    autoPlay: autoPlay.value,
+    autoSkip: autoSkip.value,
+    skipThreshold: skipThreshold.value,
+  })
 
   console.log('[PiP] Setting up video-selected listener')
   unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
@@ -336,53 +319,27 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
-        <div class="player-header">
-          <div class="header-row">
-            <h1 class="video-title">{{ currentVideo.title }}</h1>
-            <span class="upload-datetime">{{ formatDateTime(currentVideo.start_time) }}</span>
-          </div>
-          <div class="meta-row">
-            <div class="uploader-info" v-if="currentVideo.uploader_id">
-              <img v-if="getCachedUserIconUrl(currentVideo)" :src="getCachedUserIconUrl(currentVideo)!" class="avatar" />
-              <div v-else class="avatar default-avatar">👤</div>
-              <span class="user-name">{{ getCachedUserNickname(currentVideo) }}</span>
-            </div>
-            <div class="stats">
-              <span class="stat views">▶ {{ currentVideo.view_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat likes">❤️ {{ currentVideo.like_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat mylists">📝 {{ currentVideo.mylist_count?.toLocaleString() ?? 0 }}</span>
-              <span class="stat comments">💬 {{ currentVideo.comment_count?.toLocaleString() ?? 0 }}</span>
-            </div>
-          </div>
-        </div>
+        <template v-for="contentSection in pipLayout.content" :key="contentSection.section">
+          <VideoMetaPanel
+            v-if="contentSection.section === 'header' || contentSection.section === 'details'"
+            :video="currentVideo"
+            :uploader-name="getCachedUserNickname(currentVideo)"
+            :uploader-icon-url="getCachedUserIconUrl(currentVideo)"
+            :upload-date-time="formatDateTime(currentVideo.start_time)"
+            :display-mode="contentSection.videoMetaPanelMode"
+          />
 
-        <div class="video-container">
-          <div class="aspect-ratio-box">
-            <iframe
-              ref="iframeRef"
-              frameborder="0"
-              allow="autoplay; encrypted-media"
-              allowfullscreen
-            ></iframe>
+          <div v-else class="video-container">
+            <div class="aspect-ratio-box">
+              <iframe
+                ref="iframeRef"
+                frameborder="0"
+                allow="autoplay; encrypted-media"
+                allowfullscreen
+              ></iframe>
+            </div>
           </div>
-        </div>
-
-        <div class="info-below-player">
-          <div v-if="currentVideo.tags?.length" class="tags-section">
-            <span class="tag" v-for="tag in currentVideo.tags.slice(0, 12)" :key="tag">{{ tag }}</span>
-            <span class="tag more" v-if="currentVideo.tags.length > 12">+{{ currentVideo.tags.length - 12 }}</span>
-          </div>
-          <div v-if="currentVideo.description" class="description-section">
-            <div class="description-content" :class="{ collapsed: !descriptionExpanded }" v-html="currentVideo.description"></div>
-            <button
-              v-if="currentVideo.description.length > 200"
-              class="expand-btn"
-              @click="descriptionExpanded = !descriptionExpanded"
-            >
-              {{ descriptionExpanded ? '收起' : '展開' }}
-            </button>
-          </div>
-        </div>
+        </template>
       </template>
     </div>
   </div>

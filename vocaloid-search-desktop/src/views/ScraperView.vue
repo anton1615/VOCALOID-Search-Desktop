@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, type ScraperConfig, type ScraperProgress, type DatabaseStats } from '../api/tauri-commands'
+import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
 
@@ -28,17 +29,6 @@ const showConfirm = ref(false)
 const progressPollInterval = ref<number | null>(null)
 const freshnessMessage = inject<string>('freshnessMessage', '')
 const databasePath = ref('')
-
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  const hour = date.getHours().toString().padStart(2, '0')
-  const minute = date.getMinutes().toString().padStart(2, '0')
-  return `${year}/${month}/${day} ${hour}:${minute} (JST)`
-}
 
 async function loadDatabasePath() {
   try {

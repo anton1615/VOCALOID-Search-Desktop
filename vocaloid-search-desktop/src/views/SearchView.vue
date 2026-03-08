@@ -3,8 +3,12 @@ import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type Filters, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
+import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
 import PlayerColumn from '../components/PlayerColumn.vue'
+import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
+import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
+import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
+import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
 
@@ -70,19 +74,8 @@ const isDragging = ref(false)
 const searchViewRef = ref<HTMLElement | null>(null)
 const sortDropdownRef = ref<HTMLElement | null>(null)
 
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  const hour = date.getHours().toString().padStart(2, '0')
-  const minute = date.getMinutes().toString().padStart(2, '0')
-  return `${year}/${month}/${day} ${hour}:${minute}`
-}
-
 function saveSearchState() {
-  const state = {
+  const state = createSearchPersistenceState({
     sortField: sortField.value,
     sortOrder: sortOrder.value,
     excludeWatched: excludeWatched.value,
@@ -100,7 +93,7 @@ function saveSearchState() {
     likeLte: likeLte.value,
     startTimeGte: startTimeGte.value,
     startTimeLte: startTimeLte.value,
-  }
+  })
   localStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(state))
 }
 
@@ -108,12 +101,12 @@ function loadSearchState() {
   try {
     const saved = localStorage.getItem(SEARCH_STATE_KEY)
     if (saved) {
-      const state = JSON.parse(saved)
-      sortField.value = state.sortField || 'start_time'
-      sortOrder.value = state.sortOrder || 'desc'
-      excludeWatched.value = !!state.excludeWatched
-      showFormulaFilter.value = !!state.showFormulaFilter
-      formulaMinScore.value = state.formulaMinScore || 0
+      const state = restoreSearchPersistenceState(JSON.parse(saved))
+      sortField.value = state.sortField
+      sortOrder.value = state.sortOrder
+      excludeWatched.value = state.excludeWatched
+      showFormulaFilter.value = state.showFormulaFilter
+      formulaMinScore.value = state.formulaMinScore
       viewGte.value = state.viewGte
       viewLte.value = state.viewLte
       mylistGte.value = state.mylistGte
@@ -122,14 +115,10 @@ function loadSearchState() {
       commentLte.value = state.commentLte
       likeGte.value = state.likeGte
       likeLte.value = state.likeLte
-      startTimeGte.value = state.startTimeGte || ''
-      startTimeLte.value = state.startTimeLte || ''
-      if (state.formulaWeights) {
-        Object.assign(formulaWeights, state.formulaWeights)
-      }
-      if (state.sortWeights) {
-        Object.assign(sortWeights, state.sortWeights)
-      }
+      startTimeGte.value = state.startTimeGte
+      startTimeLte.value = state.startTimeLte
+      Object.assign(formulaWeights, state.formulaWeights)
+      Object.assign(sortWeights, state.sortWeights)
     }
   } catch (e) {
     console.error('Failed to load search state', e)
@@ -142,57 +131,32 @@ async function search() {
   results.value = []
   currentVideoIndex.value = -1
   currentVideo.value = null
-  
-  const filters: Filters = {}
-  
-  if (Number.isFinite(viewGte.value) || Number.isFinite(viewLte.value)) {
-    filters.view = {}
-    if (Number.isFinite(viewGte.value)) filters.view.gte = viewGte.value
-    if (Number.isFinite(viewLte.value)) filters.view.lte = viewLte.value
-  }
-  if (Number.isFinite(mylistGte.value) || Number.isFinite(mylistLte.value)) {
-    filters.mylist = {}
-    if (Number.isFinite(mylistGte.value)) filters.mylist.gte = mylistGte.value
-    if (Number.isFinite(mylistLte.value)) filters.mylist.lte = mylistLte.value
-  }
-  if (Number.isFinite(commentGte.value) || Number.isFinite(commentLte.value)) {
-    filters.comment = {}
-    if (Number.isFinite(commentGte.value)) filters.comment.gte = commentGte.value
-    if (Number.isFinite(commentLte.value)) filters.comment.lte = commentLte.value
-  }
-  if (Number.isFinite(likeGte.value) || Number.isFinite(likeLte.value)) {
-    filters.like = {}
-    if (Number.isFinite(likeGte.value)) filters.like.gte = likeGte.value
-    if (Number.isFinite(likeLte.value)) filters.like.lte = likeLte.value
-  }
-  if (startTimeGte.value || startTimeLte.value) {
-    filters.start_time = {}
-    if (startTimeGte.value) filters.start_time.gte = startTimeGte.value
-    if (startTimeLte.value) filters.start_time.lte = startTimeLte.value
-  }
-  
-  const hasFilters = Object.keys(filters).length > 0
-  
+
   try {
-    const response = await api.search({
-      query: query.value || undefined,
+    const response = await api.search(buildSearchRequest({
+      query: query.value,
       page: page.value,
-      page_size: pageSize.value,
-      sort: { 
-        by: sortField.value, 
-        direction: sortOrder.value,
-        weights: sortField.value === 'custom' ? sortWeights : undefined
-      },
-      exclude_watched: excludeWatched.value,
-      filters: hasFilters ? filters : undefined,
-      formula_filter: showFormulaFilter.value && formulaMinScore.value > 0 ? {
-        view_weight: formulaWeights.view,
-        mylist_weight: formulaWeights.mylist,
-        comment_weight: formulaWeights.comment,
-        like_weight: formulaWeights.like,
-        min_score: formulaMinScore.value
-      } : undefined,
-    })
+      pageSize: pageSize.value,
+      state: createSearchPersistenceState({
+        sortField: sortField.value,
+        sortOrder: sortOrder.value,
+        excludeWatched: excludeWatched.value,
+        showFormulaFilter: showFormulaFilter.value,
+        formulaWeights: { ...formulaWeights },
+        formulaMinScore: formulaMinScore.value,
+        sortWeights: { ...sortWeights },
+        viewGte: viewGte.value,
+        viewLte: viewLte.value,
+        mylistGte: mylistGte.value,
+        mylistLte: mylistLte.value,
+        commentGte: commentGte.value,
+        commentLte: commentLte.value,
+        likeGte: likeGte.value,
+        likeLte: likeLte.value,
+        startTimeGte: startTimeGte.value,
+        startTimeLte: startTimeLte.value,
+      }),
+    }))
     results.value = response.results
     totalCount.value = response.total
     hasNext.value = response.has_next
@@ -297,7 +261,7 @@ async function openNicoPage(event: Event, video: Video) {
 }
 
 function toggleSortOrder() {
-  sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc'
+  sortOrder.value = toggleSortDirection(sortOrder.value)
   search()
 }
 
@@ -350,27 +314,37 @@ const sortLabel = computed(() => {
 })
 
 function selectSort(field: string) {
-  if (field === 'custom') {
-    showSortMenu.value = false
-    localWeights.value = { ...sortWeights }
-    showFormulaPanel.value = true
-  } else {
-    sortField.value = field
-    showSortMenu.value = false
+  const next = selectSortOption(field, sortWeights)
+  showSortMenu.value = next.showSortMenu
+  showFormulaPanel.value = next.showFormulaPanel
+
+  if (next.localWeights) {
+    localWeights.value = next.localWeights
+  }
+
+  if (next.sortField) {
+    sortField.value = next.sortField
+  }
+
+  if (next.shouldRunSearch) {
     search()
   }
 }
 
 function applyFormula() {
-  Object.assign(sortWeights, localWeights.value)
-  sortField.value = 'custom'
-  showFormulaPanel.value = false
-  search()
+  const next = applyFormulaSelection(localWeights.value)
+  Object.assign(sortWeights, next.sortWeights)
+  sortField.value = next.sortField
+  showFormulaPanel.value = next.showFormulaPanel
+  if (next.shouldRunSearch) {
+    search()
+  }
 }
 
 function cancelFormula() {
-  showFormulaPanel.value = false
-  localWeights.value = { view: 5, mylist: 3, comment: 2, like: 1 }
+  const next = cancelFormulaSelection()
+  showFormulaPanel.value = next.showFormulaPanel
+  localWeights.value = next.localWeights
 }
 
 function startDrag(_e: MouseEvent) {
@@ -444,25 +418,19 @@ onMounted(async () => {
     const playlistState = await api.getPlaylistState()
     const searchState = await api.getSearchState()
     
-    if (playlistState.results.length > 0) {
-      // Restore existing state from Rust
+    const restored = resolveSearchRestoreState(playlistState, searchState)
+
+    if (!restored.shouldRunInitialSearch) {
       console.log('[SearchView] Restoring state from Rust:', playlistState.results.length, 'videos, index:', playlistState.index)
-      results.value = playlistState.results
-      currentVideoIndex.value = playlistState.index
-      hasNext.value = searchState.has_next
-      totalCount.value = searchState.total_count
-      page.value = searchState.page
-      
-      // Restore current video if index is valid
-      if (playlistState.index >= 0 && playlistState.index < playlistState.results.length) {
-        currentVideo.value = playlistState.results[playlistState.index]
-      }
-      
-      // Restore PiP active state
-      pipActive.value = playlistState.pip_active
+      results.value = restored.results
+      currentVideoIndex.value = restored.currentVideoIndex
+      currentVideo.value = restored.currentVideo
+      hasNext.value = restored.hasNext
+      totalCount.value = restored.totalCount
+      page.value = restored.page
+      pipActive.value = restored.pipActive
       console.log('[SearchView] Restored pipActive:', pipActive.value)
     } else {
-      // No existing state, perform initial search
       console.log('[SearchView] No existing state, performing initial search')
       await search()
     }
@@ -518,9 +486,13 @@ onMounted(async () => {
     }
     
     // Preload more results when approaching end of list
-    const remaining = results.value.length - payload.index - 1
-    if (remaining <= 10 && hasNext.value && !loadingMore.value) {
-      console.log('[SearchView] Preloading more results... (remaining:', remaining, ')')
+    if (shouldPreloadMore({
+      resultsLength: results.value.length,
+      index: payload.index,
+      hasNext: hasNext.value,
+      loadingMore: loadingMore.value,
+    })) {
+      console.log('[SearchView] Preloading more results...')
       loadMore()
     }
 
