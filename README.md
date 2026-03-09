@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.4.0 - Sync Preflight Estimates and Storage Guardrails
+
+**Highlights:**
+- Added a preflight sync confirmation flow that always runs before scraper execution
+- Shows estimated matched video count, estimated database size, and available disk space before clearing the local database
+- Reworked the scraper page with a clearer database-status banner and a more meaningful storage information section
+
+**Bug fixes:**
+- Fixed preflight count estimation so `max days = 0` correctly behaves as unlimited instead of near-zero results
+- Expanded the scraper category selector to match the backend-supported Snapshot API categories and added a no-filter option
+- Blocked sync confirmation when the estimated database size exceeds available disk space to avoid destructive out-of-space runs
+
 ### v1.3.1 - WebView Security Baseline and PiP Playback Fixes
 
 **Highlights:**

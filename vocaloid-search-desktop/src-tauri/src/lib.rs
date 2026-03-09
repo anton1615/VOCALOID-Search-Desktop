@@ -3,6 +3,7 @@ pub mod database;
 pub mod models;
 pub mod playback_settings_config;
 pub mod scraper;
+pub mod scraper_preflight;
 pub mod state;
 
 use tauri::Manager;
@@ -167,6 +168,8 @@ pub fn run() {
         commands::play_next,
         commands::play_previous,
         commands::get_database_path,
+        commands::get_storage_info,
+        commands::get_sync_preflight_estimate,
         commands::save_window_state,
         commands::load_window_state,
         commands::get_playlist_state,

@@ -12,10 +12,15 @@ const { t } = useI18n()
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()
 const isLoading = ref(true)
-const freshnessMessage = ref('')
+const freshnessStatus = ref({
+  message: '',
+  isFresh: true,
+  localLastUpdate: null as string | null,
+  apiLastUpdate: null as string | null,
+})
 const shouldRedirectToScraper = ref(false)
 
-provide('freshnessMessage', freshnessMessage.value)
+provide('freshnessStatus', freshnessStatus)
 
 const localeOptions: { value: Locale; label: string }[] = [
   { value: 'ja', label: '日本語' },
@@ -29,10 +34,16 @@ watch(() => localeStore.locale, (newLocale) => {
 
 onMounted(async () => {
   try {
-    const freshness = await invoke<{ is_fresh: boolean; message: string }>('check_database_freshness')
-    
+    const freshness = await invoke<{ is_fresh: boolean; message: string; local_last_update?: string | null; api_last_update?: string | null }>('check_database_freshness')
+
+    freshnessStatus.value = {
+      message: freshness.message,
+      isFresh: freshness.is_fresh,
+      localLastUpdate: freshness.local_last_update ?? null,
+      apiLastUpdate: freshness.api_last_update ?? null,
+    }
+
     if (!freshness.is_fresh) {
-      freshnessMessage.value = freshness.message
       shouldRedirectToScraper.value = true
       router.push('/scraper')
     }

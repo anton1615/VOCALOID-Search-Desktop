@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject } from 'vue'
+import { computed, ref, onMounted, onUnmounted, inject, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, type ScraperConfig, type ScraperProgress, type DatabaseStats } from '../api/tauri-commands'
+import { api, type ScraperConfig, type ScraperProgress, type DatabaseStats, type StorageInfo, type SyncPreflightEstimate } from '../api/tauri-commands'
 import { formatDateTime } from '../utils/dateTime'
+import { formatStorageSize, formatVideoCount } from '../features/playlistViews/scraperFormatting'
 
 const { t } = useI18n()
 
@@ -27,14 +28,24 @@ const progress = ref<ScraperProgress>({
 
 const showConfirm = ref(false)
 const progressPollInterval = ref<number | null>(null)
-const freshnessMessage = inject<string>('freshnessMessage', '')
-const databasePath = ref('')
+const freshnessStatus = inject<Ref<{ message: string; isFresh: boolean; localLastUpdate: string | null; apiLastUpdate: string | null }>>('freshnessStatus')
+const storageInfo = ref<StorageInfo | null>(null)
+const preflightEstimate = ref<SyncPreflightEstimate | null>(null)
+const preflightLoading = ref(false)
+const isStorageInsufficient = computed(() => {
+  const estimated = preflightEstimate.value?.estimated_database_size_kb
+  const free = preflightEstimate.value?.free_space_kb
+  if (estimated === null || estimated === undefined || free === null || free === undefined) {
+    return false
+  }
+  return estimated > free
+})
 
-async function loadDatabasePath() {
+async function loadStorageInfo() {
   try {
-    databasePath.value = await api.getDatabasePath()
+    storageInfo.value = await api.getStorageInfo()
   } catch (e) {
-    console.error('Failed to get database path:', e)
+    console.error('Failed to get storage info:', e)
   }
 }
 
@@ -63,10 +74,15 @@ async function saveConfig() {
 }
 
 async function startSync() {
-  if (stats.value.total_videos > 0) {
+  preflightLoading.value = true
+  preflightEstimate.value = null
+  try {
+    preflightEstimate.value = await api.getSyncPreflightEstimate()
+  } catch (e) {
+    console.error('Failed to get sync preflight estimate:', e)
+  } finally {
+    preflightLoading.value = false
     showConfirm.value = true
-  } else {
-    await runScraper()
   }
 }
 
@@ -115,12 +131,23 @@ function stopPolling() {
 }
 
 const categoryOptions = [
+  { value: null, label: t('scraper.categoryNone') },
   { value: 'MUSIC', label: '音樂' },
   { value: 'GAME', label: '遊戲' },
   { value: 'ANIME', label: '動畫' },
   { value: 'ENTERTAINMENT', label: '娛樂' },
   { value: 'DANCE', label: '舞蹈' },
+  { value: 'ANIMAL', label: t('scraper.categoryAnimal') },
+  { value: 'NATURE', label: t('scraper.categoryNature') },
+  { value: 'COOKING', label: t('scraper.categoryCooking') },
+  { value: 'TRAVEL', label: t('scraper.categoryTravel') },
+  { value: 'VEHICLE', label: t('scraper.categoryVehicle') },
+  { value: 'SPORTS', label: t('scraper.categorySports') },
+  { value: 'SOCIAL', label: t('scraper.categorySocial') },
+  { value: 'TECHNICAL', label: t('scraper.categoryTechnical') },
+  { value: 'LECTURE', label: t('scraper.categoryLecture') },
   { value: 'OTHER', label: '其他' },
+  { value: 'RADIO', label: t('scraper.categoryRadio') },
 ]
 
 const targetOptions = [
@@ -134,7 +161,7 @@ const targetOptions = [
 onMounted(async () => {
   await loadConfig()
   await loadStats()
-  await loadDatabasePath()
+  await loadStorageInfo()
   
   try {
     const currentProgress = await api.getScraperProgress()
@@ -157,8 +184,11 @@ onUnmounted(() => {
   <div class="scraper-view">
     <h2>{{ t('scraper.title') }}</h2>
     
-    <div v-if="freshnessMessage" class="alert alert-warning">
-      ⚠️ {{ freshnessMessage }}
+    <div v-if="freshnessStatus?.message && !freshnessStatus.isFresh" class="alert alert-warning status-card">
+      <div class="status-title">
+        {{ stats.total_videos > 0 ? t('scraper.updateAvailableTitle') : t('scraper.emptyDatabaseTitle') }}
+      </div>
+      <div class="status-message">{{ freshnessStatus.message }}</div>
     </div>
     
     <div class="stats-card">
@@ -174,9 +204,13 @@ onUnmounted(() => {
       </div>
     </div>
     
-    <div v-if="databasePath" class="path-info">
-      <span class="label">Database:</span>
-      <code>{{ databasePath }}</code>
+    <div v-if="storageInfo" class="path-info">
+      <h3>{{ t('scraper.storageTitle') }}</h3>
+      <div class="storage-row">
+        <span class="label">{{ t('scraper.dataDirectory') }}</span>
+        <code>{{ storageInfo.data_directory }}</code>
+      </div>
+      <p class="storage-description">{{ t('scraper.storageDescription') }}</p>
     </div>
     
     <div class="config-form">
@@ -207,7 +241,7 @@ onUnmounted(() => {
         <div class="form-group">
           <label>{{ t('scraper.category') }}</label>
           <select v-model="config.category_filter" @change="saveConfig">
-            <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+            <option v-for="opt in categoryOptions" :key="opt.value ?? 'none'" :value="opt.value">
               {{ opt.label }}
             </option>
           </select>
@@ -268,10 +302,29 @@ onUnmounted(() => {
     <div v-if="showConfirm" class="modal-backdrop" @click.self="showConfirm = false">
       <div class="modal">
         <h3>{{ t('scraper.startSync') }}</h3>
-        <p>{{ t('scraper.confirmClear') }}</p>
+        <p>{{ t('scraper.confirmClearReplace') }}</p>
+        <div v-if="preflightLoading" class="modal-info-row">{{ t('scraper.preflightLoading') }}</div>
+        <template v-else>
+          <div v-if="isStorageInsufficient" class="alert alert-danger insufficient-storage-alert">
+            <div class="status-title">{{ t('scraper.insufficientStorageTitle') }}</div>
+            <div class="status-message">{{ t('scraper.insufficientStorageMessage') }}</div>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.estimatedVideos') }}</span>
+            <strong>{{ formatVideoCount(preflightEstimate?.estimated_video_count ?? null) }}</strong>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.estimatedDatabaseSize') }}</span>
+            <strong>{{ formatStorageSize(preflightEstimate?.estimated_database_size_kb ?? null) }}</strong>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.availableDiskSpace') }}</span>
+            <strong>{{ formatStorageSize(preflightEstimate?.free_space_kb ?? null) }}</strong>
+          </div>
+        </template>
         <div class="modal-actions">
           <button @click="showConfirm = false" class="btn-secondary">{{ t('scraper.cancel') }}</button>
-          <button @click="runScraper" class="btn-primary">OK</button>
+          <button v-if="!isStorageInsufficient" @click="runScraper" class="btn-primary">OK</button>
         </div>
       </div>
     </div>
@@ -300,6 +353,55 @@ h2 {
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
   color: #fbbf24;
+}
+
+.alert-danger {
+  background: rgba(220, 53, 69, 0.12);
+  border: 1px solid rgba(220, 53, 69, 0.35);
+  color: #ff808f;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-title {
+  font-weight: 700;
+}
+
+.status-message {
+  color: var(--text-primary);
+}
+
+.storage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.storage-description {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.modal-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.modal-info-row strong {
+  text-align: right;
+  word-break: break-word;
+}
+
+.insufficient-storage-alert {
+  margin-bottom: 1rem;
 }
 
 .path-info {

@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.4.0 - 同步前預估與儲存空間防護
+
+**主要變更:**
+- 新增每次執行 scraper 前都會出現的 preflight 同步確認流程
+- 在清空本機資料庫前先顯示預估影片數、預估資料庫大小與可用磁碟空間
+- 重整同步頁的資料庫狀態提示與儲存位置區塊，讓資訊更清楚易懂
+
+**錯誤修復:**
+- 修正 `max days = 0` 時應視為 unlimited，避免預估影片數異常接近零
+- 將同步頁分類下拉選單補齊為 backend 支援的 Snapshot API 分類，並新增「無」選項
+- 當預估資料庫大小超過可用磁碟空間時，隱藏確認按鈕並顯示醒目警告，避免硬碟空間不足時仍啟動同步
+
 ### v1.3.1 - WebView 安全基線與 PiP 播放修正
 
 **主要變更:**

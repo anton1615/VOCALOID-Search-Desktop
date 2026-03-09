@@ -1303,6 +1303,55 @@ pub fn get_database_path(
 }
 
 #[tauri::command]
+pub fn get_storage_info(
+    app: tauri::AppHandle,
+) -> Result<StorageInfo, String> {
+    use crate::database::{get_data_dir, get_db_path};
+
+    let data_dir = get_data_dir(&app);
+    let db_path = get_db_path(&app);
+    let database_size_kb = std::fs::metadata(db_path)
+        .ok()
+        .map(|metadata| metadata.len() / 1024);
+
+    Ok(StorageInfo {
+        data_directory: data_dir.display().to_string(),
+        database_size_kb,
+    })
+}
+
+#[tauri::command]
+pub async fn get_sync_preflight_estimate(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncPreflightEstimate, String> {
+    let config = state.config.read().clone();
+    let estimated_video_count = crate::scraper_preflight::estimate_video_count(&config).await;
+
+    use crate::database::{get_data_dir, get_db_path};
+    let data_dir = get_data_dir(&app);
+    let db_path = get_db_path(&app);
+    let current_database_size_kb = std::fs::metadata(db_path)
+        .ok()
+        .map(|metadata| metadata.len() / 1024);
+    let current_total_videos = state.db.get_total_videos().unwrap_or(0);
+
+    let estimated_database_size_kb = crate::scraper_preflight::estimate_database_size_kb(
+        estimated_video_count,
+        current_database_size_kb,
+        current_total_videos,
+    );
+
+    let free_space_kb = crate::scraper_preflight::lookup_free_space_kb(&data_dir);
+
+    Ok(SyncPreflightEstimate {
+        estimated_video_count,
+        estimated_database_size_kb,
+        free_space_kb,
+    })
+}
+
+#[tauri::command]
 pub async fn save_window_state(
     app: tauri::AppHandle,
     state: WindowState,

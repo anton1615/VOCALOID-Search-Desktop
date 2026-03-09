@@ -215,6 +215,19 @@ pub struct FreshnessCheck {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageInfo {
+    pub data_directory: String,
+    pub database_size_kb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPreflightEstimate {
+    pub estimated_video_count: Option<usize>,
+    pub estimated_database_size_kb: Option<u64>,
+    pub free_space_kb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScraperProgress {
     pub is_running: bool,
     pub videos_fetched: usize,

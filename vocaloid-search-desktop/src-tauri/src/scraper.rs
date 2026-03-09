@@ -82,9 +82,13 @@ impl Scraper {
         let mut last_start_time: Option<String> = None;
         let mut api_reported_total: Option<usize> = None;
         
-        let start_after = self.config.max_age_days.map(|days| {
-            let date = Utc::now() - chrono::Duration::days(days);
-            date.format("%Y-%m-%dT%H:%M:%S+09:00").to_string()
+        let start_after = self.config.max_age_days.and_then(|days| {
+            if days > 0 {
+                let date = Utc::now() - chrono::Duration::days(days);
+                Some(date.format("%Y-%m-%dT%H:%M:%S+09:00").to_string())
+            } else {
+                None
+            }
         });
         
         let mut round_num = 1;

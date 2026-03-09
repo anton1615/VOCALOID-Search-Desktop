@@ -151,6 +151,17 @@ export interface DatabaseStats {
   last_update: string | null
 }
 
+export interface StorageInfo {
+  data_directory: string
+  database_size_kb: number | null
+}
+
+export interface SyncPreflightEstimate {
+  estimated_video_count: number | null
+  estimated_database_size_kb: number | null
+  free_space_kb: number | null
+}
+
 export interface FreshnessCheck {
   is_fresh: boolean
   local_last_update: string | null
@@ -312,6 +323,14 @@ export const api = {
   },
   getDatabasePath: async (): Promise<string> => {
     return invoke('get_database_path')
+  },
+
+  getStorageInfo: async (): Promise<StorageInfo> => {
+    return invoke('get_storage_info')
+  },
+
+  getSyncPreflightEstimate: async (): Promise<SyncPreflightEstimate> => {
+    return invoke('get_sync_preflight_estimate')
   },
   
   // Watch Later API
