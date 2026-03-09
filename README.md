@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.3.1 - WebView Security Baseline and PiP Playback Fixes
+
+**Highlights:**
+- Added a minimal Tauri WebView CSP baseline instead of leaving CSP disabled
+- Preserved development startup, packaged builds, and embedded NicoNico playback under the new baseline
+- Synced PiP playback behavior with the main window so embedded playback remains stable across both windows
+
+**Bug fixes:**
+- Fixed a PiP regression where the embedded player iframe could render without a bound source after re-render
+- Fixed PiP autoplay failing after load-complete events when iframe window targeting was unavailable
+- Documented deferred shell hardening so `shell:allow-open` remains tracked without expanding the scope of this release
+
 ### v1.3.0 - Playback Settings Refinement
 
 **Highlights:**

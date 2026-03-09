@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.3.1 - WebView 安全基線與 PiP 播放修正
+
+**主要變更:**
+- 為 Tauri WebView 加入最小可行的 CSP baseline，不再維持 `csp: null`
+- 在新 baseline 下保留開發啟動、封裝建置與 NicoNico 嵌入播放器的相容性
+- 將 PiP 與主視窗的播放路徑對齊，讓兩個視窗的嵌入播放行為保持一致
+
+**錯誤修復:**
+- 修正 PiP 在重新 render 後可能留下未綁定來源 iframe 的回歸問題
+- 修正 load-complete 之後若無法直接取得 iframe window，PiP 自動播放會失敗的問題
+- 將 `shell:allow-open` 的 hardening 明確記錄為後續工作，同時避免擴大本次 release 範圍
+
 ### v1.3.0 - 播放設定改善
 
 **主要變更:**

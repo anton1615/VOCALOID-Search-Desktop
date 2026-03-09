@@ -49,6 +49,13 @@ The system SHALL support video playback in the PiP window with same controls as 
 - **THEN** PiP window handles the event locally
 - **AND** notifies Rust backend of state changes
 
+#### Scenario: PiP playback remains functional under desktop CSP baseline
+- **WHEN** the desktop app enforces its baseline WebView Content Security Policy
+- **AND** a user opens playback in the PiP window
+- **THEN** the embedded player iframe loads successfully in the PiP window
+- **AND** PiP playback behavior remains functional
+- **AND** PiP autoplay continues to use the embedded player command target reliably after load-complete events
+
 ### Requirement: Watch history tracked locally
 
 The system SHALL track watched videos for the single local user without authentication.

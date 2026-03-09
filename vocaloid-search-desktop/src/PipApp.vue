@@ -8,10 +8,13 @@ import VideoMetaPanel from './components/VideoMetaPanel.vue'
 import { formatDateTime } from './utils/dateTime'
 import { createEmbeddedPlayerController } from './features/playlistViews/embeddedPlayerController'
 import { getPipLayout } from './features/playlistViews/pipLayout'
+import { resolvePlayerCommandTarget } from './features/playlistViews/playerCommandTarget'
+import { rememberPlayerMessageSource, type PostMessageTarget } from './features/playlistViews/playerMessageSource'
 const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
 const hasNext = ref(false)
 const iframeRef = ref<HTMLIFrameElement | null>(null)
+let lastPlayerMessageSource: PostMessageTarget | null = null
 const autoPlay = ref(true)
 const autoSkip = ref(false)
 const skipThreshold = ref(30)
@@ -87,7 +90,12 @@ function loadPlayer(videoId: string) {
 }
 
 function sendCommand(command: string) {
-  iframeRef.value?.contentWindow?.postMessage(
+  const target = resolvePlayerCommandTarget({
+    lastMessageSource: lastPlayerMessageSource,
+    iframeWindow: iframeRef.value?.contentWindow ?? null,
+  })
+
+  target?.postMessage(
     {
       eventName: command,
       playerId: '1',
@@ -180,6 +188,8 @@ async function handleVideoChange(video: Video, index: number, hasNextVideo: bool
 
 function handleMessage(event: MessageEvent) {
   if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
+
+  lastPlayerMessageSource = rememberPlayerMessageSource(event.source)
 
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
   playerController.setPlaybackSettings({
@@ -333,6 +343,7 @@ onUnmounted(() => {
             <div class="aspect-ratio-box">
               <iframe
                 ref="iframeRef"
+                :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
                 frameborder="0"
                 allow="autoplay; encrypted-media"
                 allowfullscreen
