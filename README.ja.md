@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.4.1 - 共通アバター fallback
+
+**主な変更点:**
+- プレイヤー系と一覧系で共通利用できる uploader avatar コンポーネントを追加
+- `user_id` から導出する既存の Niconico アバター URL を維持しつつ、ブラウザ側で Niconico の blank avatar へフォールバックするよう改善
+- プレイヤー情報欄、PiP 情報欄、検索結果一覧で uploader avatar の表示挙動を統一
+
+**バグ修正:**
+- ニコニコでカスタムアバター未設定のユーザーに broken image が表示される問題を修正
+- 検索結果一覧で失敗したアバター画像を単に非表示にしていた挙動を、blank avatar への proper fallback に変更
+- 主アバターと blank avatar の両方が読み込めない場合でも、ローカル placeholder avatar を最後の保険として維持
+
 ### v1.4.0 - 同期前見積もりとストレージ保護
 
 **主な変更点:**

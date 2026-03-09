@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.4.1 - Shared Avatar Fallback
+
+**Highlights:**
+- Added a shared uploader avatar component so player and list views now render avatar images through one consistent path
+- Kept the existing per-user Niconico avatar URL derivation while adding a browser-side fallback to Niconico's default blank avatar
+- Unified uploader avatar behavior across the player metadata panel, PiP metadata panel, and search results list
+
+**Bug fixes:**
+- Fixed broken uploader images for users who do not have a custom Niconico avatar
+- Replaced the old search-result behavior that hid failed avatar images with a proper blank-avatar fallback
+- Preserved the local placeholder avatar as a final fallback if both remote avatar images fail to load
+
 ### v1.4.0 - Sync Preflight Estimates and Storage Guardrails
 
 **Highlights:**

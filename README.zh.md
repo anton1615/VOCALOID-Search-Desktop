@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.4.1 - 共用頭像 fallback
+
+**主要變更:**
+- 新增共用 uploader avatar 元件，讓播放器與清單頁都走同一套頭像渲染流程
+- 保留原本依 `user_id` 推導 Niconico 頭像網址的方式，並在瀏覽器端加入 Niconico 預設 blank avatar fallback
+- 統一播放器資訊區、PiP 資訊區與搜尋結果清單的 uploader 頭像顯示行為
+
+**錯誤修復:**
+- 修正沒有自訂 Niconico 頭像的使用者會顯示 broken image 的問題
+- 將搜尋結果清單原本單純隱藏失敗頭像的處理，改為正確 fallback 到 blank avatar
+- 若主要頭像與 blank avatar 都無法載入，保留本地 placeholder avatar 作為最後保底
+
 ### v1.4.0 - 同步前預估與儲存空間防護
 
 **主要變更:**

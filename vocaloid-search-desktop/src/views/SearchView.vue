@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
 import PlayerColumn from '../components/PlayerColumn.vue'
+import UploaderAvatar from '../components/UploaderAvatar.vue'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
 import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
@@ -623,13 +624,11 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
         >
           <div class="left-column">
             <div class="rank">{{ idx + 1 }}</div>
-            <img 
-              v-if="getUploaderAvatarUrl(video.uploader_id)" 
-              :src="getUploaderAvatarUrl(video.uploader_id)!" 
+            <UploaderAvatar
+              :src="getUploaderAvatarUrl(video.uploader_id)"
+              :alt="video.uploader_name || video.uploader_id || 'Uploader avatar'"
               class="uploader-avatar"
-              @error="($event.target as HTMLImageElement).style.display='none'"
             />
-            <div v-else class="uploader-avatar default-avatar">👤</div>
           </div>
           
           <div class="thumbnail-wrapper" @click="playVideo(video)">

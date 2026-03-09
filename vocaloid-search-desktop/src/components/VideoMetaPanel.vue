@@ -6,6 +6,7 @@ import {
   type VideoMetaPanelDisplayMode,
 } from '../features/playlistViews/videoMetaPanelLayout'
 import { sanitizeDescriptionHtml } from '../features/playlistViews/videoMetaPanelSanitization'
+import UploaderAvatar from './UploaderAvatar.vue'
 
 const props = withDefaults(defineProps<{
   video: Video
@@ -44,8 +45,11 @@ const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.
       </div>
       <div class="meta-row">
         <div v-if="hasUploader" class="uploader-info">
-          <img v-if="uploaderIconUrl" :src="uploaderIconUrl" class="avatar" />
-          <div v-else class="avatar default-avatar">👤</div>
+          <UploaderAvatar
+            :src="uploaderIconUrl"
+            :alt="uploaderName || video.uploader_name || video.uploader_id || 'Uploader avatar'"
+            class="avatar"
+          />
           <span class="user-name">{{ uploaderName || video.uploader_name || video.uploader_id }}</span>
         </div>
         <div v-else-if="showUploaderPlaceholder" class="uploader-info-placeholder"></div>
