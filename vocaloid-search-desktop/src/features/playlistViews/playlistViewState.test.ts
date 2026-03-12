@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import type { Video } from '../../api/tauri-commands'
 import {
   createHydratedCurrentVideo,
   getInitialPlaylistViewState,
   mergePagedResults,
+  shouldApplyPlaylistSelection,
+  shouldApplyPlaylistSelectionVersion,
 } from './playlistViewState'
 
 const baseVideo: Video = {
@@ -25,13 +29,15 @@ const baseVideo: Video = {
 }
 
 describe('playlistViewState shared logic', () => {
-  test('restores saved playlist item only when playlist type matches and index is in range', () => {
+  test('restores saved playlist item only when playlist type, version, and index all match', () => {
     const results = [baseVideo, { ...baseVideo, id: 'sm10' }]
 
     expect(
       getInitialPlaylistViewState({
         expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
         playlistType: 'History',
+        playlistVersion: 3,
         playlistIndex: 1,
         results,
       })
@@ -40,7 +46,9 @@ describe('playlistViewState shared logic', () => {
     expect(
       getInitialPlaylistViewState({
         expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
         playlistType: 'WatchLater',
+        playlistVersion: 3,
         playlistIndex: 1,
         results,
       })
@@ -49,8 +57,32 @@ describe('playlistViewState shared logic', () => {
     expect(
       getInitialPlaylistViewState({
         expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
         playlistType: 'History',
+        playlistVersion: 2,
+        playlistIndex: 1,
+        results,
+      })
+    ).toEqual({ selectedIndex: -1, selectedVideo: null })
+
+    expect(
+      getInitialPlaylistViewState({
+        expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
+        playlistType: 'History',
+        playlistVersion: 3,
         playlistIndex: 5,
+        results,
+      })
+    ).toEqual({ selectedIndex: -1, selectedVideo: null })
+
+    expect(
+      getInitialPlaylistViewState({
+        expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
+        playlistType: 'History',
+        playlistVersion: 3,
+        playlistIndex: -1,
         results,
       })
     ).toEqual({ selectedIndex: -1, selectedVideo: null })
@@ -82,5 +114,34 @@ describe('playlistViewState shared logic', () => {
 
     expect(merged).toEqual([baseVideo, incoming[0]])
     expect(existing).toEqual([baseVideo])
+  })
+
+  test('applies playlist selection only when payload playlist type matches expected view', () => {
+    expect(shouldApplyPlaylistSelection('Search', { playlist_type: 'Search' })).toBe(true)
+    expect(shouldApplyPlaylistSelection('Search', { playlist_type: 'History' })).toBe(false)
+    expect(shouldApplyPlaylistSelection('WatchLater', { playlist_type: 'Search' })).toBe(false)
+  })
+
+  test('applies playlist selection only when payload playlist version matches expected view version', () => {
+    expect(shouldApplyPlaylistSelectionVersion(3, { playlist_version: 3 })).toBe(true)
+    expect(shouldApplyPlaylistSelectionVersion(3, { playlist_version: 2 })).toBe(false)
+  })
+
+  test('only explicit play handlers rebind the active playlist source', () => {
+    const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')
+    const historyViewPath = resolve(__dirname, '../../views/HistoryView.vue')
+    const watchLaterViewPath = resolve(__dirname, '../../views/WatchLaterView.vue')
+
+    const searchSource = readFileSync(searchViewPath, 'utf8')
+    const historySource = readFileSync(historyViewPath, 'utf8')
+    const watchLaterSource = readFileSync(watchLaterViewPath, 'utf8')
+
+    expect(searchSource).toContain("await api.setPlaylistType('Search')")
+    expect(historySource).toContain("await api.setPlaylistType('History')")
+    expect(watchLaterSource).toContain("await api.setPlaylistType('WatchLater')")
+
+    expect(searchSource).not.toContain("onMounted(async () => {\n  await api.setPlaylistType('Search')")
+    expect(historySource).not.toContain("onMounted(async () => {\n  await api.setPlaylistType('History')")
+    expect(watchLaterSource).not.toContain("onMounted(async () => {\n  await api.setPlaylistType('WatchLater')")
   })
 })

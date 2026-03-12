@@ -10,6 +10,7 @@ import { createEmbeddedPlayerController } from './features/playlistViews/embedde
 import { getPipLayout } from './features/playlistViews/pipLayout'
 import { resolvePlayerCommandTarget } from './features/playlistViews/playerCommandTarget'
 import { rememberPlayerMessageSource, type PostMessageTarget } from './features/playlistViews/playerMessageSource'
+import { canPreloadSearchResults } from './features/playlistViews/searchViewInteractions'
 const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
 const hasNext = ref(false)
@@ -117,26 +118,28 @@ async function playNext() {
     const playlistState = await api.getPlaylistState()
     const remaining = playlistState.results.length - currentIndex.value - 1
     
-    if (remaining <= 5 && hasNext.value) {
-      // Close to end, try to preload more
+    const canPreload = canPreloadSearchResults(playlistState.playlist_type)
+
+    if (remaining <= 5 && hasNext.value && canPreload) {
+      // Close to end, try to preload more for Search playlists only
       try {
         const searchState = await api.getSearchState()
         if (searchState.has_next) {
           console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
-          await api.loadMore()
+          await api.loadMore('Search', searchState.version)
         }
       } catch (e) {
         console.error('[PiP] Preload failed:', e)
       }
-    } else if (!hasNext.value) {
-      // At the end, try to load more as last resort
+    } else if (!hasNext.value && canPreload) {
+      // At the end, try to load more as last resort for Search playlists only
       try {
         const searchState = await api.getSearchState()
         if (searchState.has_next) {
           console.log('[PiP] At end, loading more...')
-          await api.loadMore()
+          await api.loadMore('Search', searchState.version)
           const newPlaylistState = await api.getPlaylistState()
-          if (newPlaylistState.index + 1 < newPlaylistState.results.length) {
+          if (newPlaylistState.index !== null && newPlaylistState.index + 1 < newPlaylistState.results.length) {
             hasNext.value = true
           }
         }
@@ -216,7 +219,7 @@ onMounted(async () => {
 
   const state = await api.getPlaylistState()
   console.log('[PiP] getPlaylistState result:', state.results.length, 'videos, index:', state.index)
-  if (state.results.length > 0 && state.index >= 0 && state.index < state.results.length) {
+  if (state.results.length > 0 && state.index !== null && state.index >= 0 && state.index < state.results.length) {
     await handleVideoChange(state.results[state.index], state.index, state.has_next)
   }
 
@@ -233,6 +236,13 @@ onMounted(async () => {
   console.log('[PiP] Setting up video-selected listener')
   unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
     const payload = event.payload
+    const latestPlaylistState = await api.getPlaylistState()
+    if (
+      payload.playlist_type !== latestPlaylistState.playlist_type ||
+      payload.playlist_version !== latestPlaylistState.playlist_version
+    ) {
+      return
+    }
     console.log('[PiP] Received video-selected event:', payload.video.id, 'index:', payload.index)
     await handleVideoChange(payload.video, payload.index, payload.has_next)
   })

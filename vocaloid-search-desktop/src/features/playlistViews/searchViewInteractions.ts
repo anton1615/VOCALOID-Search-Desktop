@@ -1,3 +1,5 @@
+import type { PlaylistType } from '../../api/tauri-commands'
+
 const defaultWeights = { view: 5, mylist: 3, comment: 2, like: 1 }
 
 export function toggleSortDirection(current: string): 'asc' | 'desc' {
@@ -56,4 +58,8 @@ export function shouldPreloadMore({
 }): boolean {
   const remaining = resultsLength - index - 1
   return remaining <= 10 && hasNext && !loadingMore
+}
+
+export function canPreloadSearchResults(playlistType: PlaylistType): boolean {
+  return playlistType === 'Search'
 }

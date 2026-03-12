@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   applyFormulaSelection,
+  canPreloadSearchResults,
   cancelFormulaSelection,
   selectSortOption,
   shouldPreloadMore,
@@ -54,5 +55,11 @@ describe('searchViewInteractions', () => {
     expect(shouldPreloadMore({ resultsLength: 20, index: 1, hasNext: true, loadingMore: false })).toBe(false)
     expect(shouldPreloadMore({ resultsLength: 20, index: 9, hasNext: false, loadingMore: false })).toBe(false)
     expect(shouldPreloadMore({ resultsLength: 20, index: 9, hasNext: true, loadingMore: true })).toBe(false)
+  })
+
+  test('canPreloadSearchResults only allows Search playlists', () => {
+    expect(canPreloadSearchResults('Search')).toBe(true)
+    expect(canPreloadSearchResults('History')).toBe(false)
+    expect(canPreloadSearchResults('WatchLater')).toBe(false)
   })
 })

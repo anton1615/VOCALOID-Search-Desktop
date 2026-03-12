@@ -1,17 +1,29 @@
 <script setup lang="ts">
-import { ref, onMounted, provide, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
+import PlayerColumn from './components/PlayerColumn.vue'
+import { api, type Video, type VideoSelectedPayload } from './api/tauri-commands'
 import { useThemeStore } from './stores/theme'
 import { useLocaleStore, type Locale } from './stores/locale'
 import { i18n } from './i18n'
 
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()
 const isLoading = ref(true)
+const listWidth = ref(40)
+const isDragging = ref(false)
+const splitLayoutRef = ref<HTMLElement | null>(null)
+const currentVideo = ref<Video | null>(null)
+const currentVideoIndex = ref(-1)
+const resultsCount = ref(0)
+const hasNext = ref(false)
+const pipActive = ref(false)
 const freshnessStatus = ref({
   message: '',
   isFresh: true,
@@ -32,6 +44,87 @@ watch(() => localeStore.locale, (newLocale) => {
   i18n.global.locale.value = newLocale
 })
 
+const showsSplitLayout = computed(() => route.name !== 'scraper')
+
+async function syncActivePlayback(state: { results: Video[]; index: number | null; has_next: boolean; pip_active: boolean }) {
+  resultsCount.value = state.results.length
+  hasNext.value = state.has_next
+  pipActive.value = state.pip_active
+
+  if (state.index !== null && state.index >= 0 && state.index < state.results.length) {
+    currentVideoIndex.value = state.index
+    const baseVideo = state.results[state.index]
+    try {
+      currentVideo.value = await api.fetchFullVideoInfo(baseVideo.id)
+    } catch {
+      currentVideo.value = baseVideo
+    }
+  } else {
+    currentVideoIndex.value = -1
+    currentVideo.value = null
+  }
+}
+
+async function refreshActivePlayback() {
+  const playlistState = await api.getPlaylistState()
+  await syncActivePlayback(playlistState)
+}
+
+async function playNext() {
+  if (currentVideoIndex.value >= 0 && currentVideoIndex.value + 1 < resultsCount.value) {
+    await api.setPlaylistIndex(currentVideoIndex.value + 1)
+  }
+}
+
+async function playPrevious() {
+  if (currentVideoIndex.value > 0) {
+    await api.setPlaylistIndex(currentVideoIndex.value - 1)
+  }
+}
+
+async function openPip() {
+  if (!currentVideo.value) return
+  await api.openPipWindow()
+  pipActive.value = true
+}
+
+async function closePip() {
+  try {
+    await api.closePipWindow()
+  } catch (e) {
+    console.error('Failed to close PiP window:', e)
+  }
+  pipActive.value = false
+}
+
+function handleVideoWatched(video: Video) {
+  if (currentVideo.value?.id === video.id) {
+    currentVideo.value = video
+  }
+}
+
+function startDrag() {
+  isDragging.value = true
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
+
+function onDrag(e: MouseEvent) {
+  if (!isDragging.value || !splitLayoutRef.value) return
+  const rect = splitLayoutRef.value.getBoundingClientRect()
+  const newWidth = ((e.clientX - rect.left) / rect.width) * 100
+  listWidth.value = Math.min(60, Math.max(25, newWidth))
+}
+
+function stopDrag() {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+}
+
+let unlistenVideoSelected: (() => void) | null = null
+let unlistenPipClosed: (() => void) | null = null
+
 onMounted(async () => {
   try {
     const freshness = await invoke<{ is_fresh: boolean; message: string; local_last_update?: string | null; api_last_update?: string | null }>('check_database_freshness')
@@ -43,6 +136,16 @@ onMounted(async () => {
       apiLastUpdate: freshness.api_last_update ?? null,
     }
 
+    await refreshActivePlayback()
+
+    unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async () => {
+      await refreshActivePlayback()
+    })
+
+    unlistenPipClosed = await listen('pip-closed', () => {
+      pipActive.value = false
+    })
+
     if (!freshness.is_fresh) {
       shouldRedirectToScraper.value = true
       router.push('/scraper')
@@ -52,6 +155,12 @@ onMounted(async () => {
   } finally {
     isLoading.value = false
   }
+})
+
+onUnmounted(() => {
+  if (unlistenVideoSelected) unlistenVideoSelected()
+  if (unlistenPipClosed) unlistenPipClosed()
+  stopDrag()
 })
 </script>
 
@@ -95,6 +204,33 @@ onMounted(async () => {
         <div class="spinner"></div>
         <p>載入中...</p>
       </div>
+      <template v-else-if="showsSplitLayout">
+        <div class="split-layout" ref="splitLayoutRef">
+          <div class="list-pane" :style="{ width: `${listWidth}%`, minWidth: '320px', maxWidth: '60%' }">
+            <router-view />
+          </div>
+
+          <div
+            class="resize-divider"
+            @mousedown="startDrag"
+            :class="{ dragging: isDragging }"
+          ></div>
+
+          <PlayerColumn
+            :current-video="currentVideo"
+            :current-video-index="currentVideoIndex"
+            :results-count="resultsCount"
+            :has-next="hasNext"
+            :pip-active="pipActive"
+            :show-auto-skip="true"
+            @play-next="playNext"
+            @play-previous="playPrevious"
+            @open-pip="openPip"
+            @close-pip="closePip"
+            @video-watched="handleVideoWatched"
+          />
+        </div>
+      </template>
       <router-view v-else />
     </main>
   </div>
@@ -150,7 +286,37 @@ onMounted(async () => {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+}
+
+.split-layout {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  background: var(--color-bg-primary);
+}
+
+.list-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.resize-divider {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--color-border-subtle);
+  transition: background 0.2s;
+}
+
+.resize-divider:hover,
+.resize-divider.dragging {
+  background: var(--color-accent-primary);
 }
 
 .loading {

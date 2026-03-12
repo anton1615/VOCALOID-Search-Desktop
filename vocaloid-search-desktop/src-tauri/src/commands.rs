@@ -7,22 +7,58 @@ use async_channel;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
+fn playlist_results_for_type(state: &AppState, playlist_type: PlaylistType) -> Vec<Video> {
+    match playlist_type {
+        PlaylistType::Search => state.search_results.read().clone(),
+        PlaylistType::History => state.history_results.read().clone(),
+        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    }
+}
+
+fn playlist_version_for_type(state: &AppState, playlist_type: PlaylistType) -> u64 {
+    match playlist_type {
+        PlaylistType::Search => state.search_state.read().version,
+        PlaylistType::History => state.history_state.read().version,
+        PlaylistType::WatchLater => state.watch_later_state.read().version,
+    }
+}
+
 #[tauri::command]
 pub async fn get_playlist_state(
     state: tauri::State<'_, AppState>,
 ) -> Result<PlaylistState, String> {
+    // Check if there's active playback
+    let active_playback = state.active_playback.read().clone();
+    
+    if let Some(ref playback) = active_playback {
+        // Get the list context for active playback
+        let list_contexts = state.list_contexts.read();
+        if let Some(context) = list_contexts.get(&playback.list_id) {
+            let playlist_type = PlaylistType::from(&playback.list_id);
+            let results = context.items.clone();
+            let index = Some(playback.current_index);
+            let has_next = index.map(|i| i + 1 < results.len()).unwrap_or(false);
+            let pip_active = *state.pip_active.read();
+            let playlist_version = context.version;
+
+            return Ok(PlaylistState {
+                playlist_type,
+                results,
+                index,
+                has_next,
+                pip_active,
+                playlist_version,
+            });
+        }
+    }
+    
+    // Fallback to legacy behavior (for migration compatibility)
     let playlist_type = *state.playlist_type.read();
-    
-    // Get results based on playlist type
-    let results = match playlist_type {
-        PlaylistType::Search => state.search_results.read().clone(),
-        PlaylistType::History => state.history_results.read().clone(),
-        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
-    };
-    
+    let results = playlist_results_for_type(&state, playlist_type);
     let index = *state.playlist_index.read();
-    let has_next = index + 1 < results.len();
+    let has_next = index.map(|i| i + 1 < results.len()).unwrap_or(false);
     let pip_active = *state.pip_active.read();
+    let playlist_version = playlist_version_for_type(&state, playlist_type);
 
     Ok(PlaylistState {
         playlist_type,
@@ -30,6 +66,7 @@ pub async fn get_playlist_state(
         index,
         has_next,
         pip_active,
+        playlist_version,
     })
 }
 
@@ -40,38 +77,51 @@ pub async fn set_playlist_index(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     println!("[set_playlist_index] Called with index: {}", index);
-    
+
     let playlist_type = *state.playlist_type.read();
+    let list_id = ListContextId::from(playlist_type);
     
-    // Get results based on playlist type
-    let results = match playlist_type {
-        PlaylistType::Search => state.search_results.read().clone(),
-        PlaylistType::History => state.history_results.read().clone(),
-        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    // Get results from list_contexts first (new model), fallback to legacy
+    let results = state.get_list_context_items(&list_id);
+    let results = if results.is_empty() {
+        playlist_results_for_type(&state, playlist_type)
+    } else {
+        results
     };
-    println!("[set_playlist_index] Playlist type: {:?}, Results length: {}", playlist_type, results.len());
     
+    println!("[set_playlist_index] Playlist type: {:?}, Results length: {}", playlist_type, results.len());
+
     if index >= results.len() {
         println!("[set_playlist_index] ERROR: Index {} >= len {}", index, results.len());
         return Err("Index out of bounds".to_string());
     }
 
+    // Get current version from list_context
+    let list_version = state.get_list_context_version(&list_id);
+    
+    // Update legacy playlist_index
     {
         let mut current_index = state.playlist_index.write();
-        *current_index = index;
+        *current_index = Some(index);
         println!("[set_playlist_index] Updated playlist_index to: {}", index);
     }
+    
+    // Set active playback (new model)
+    state.set_active_playback(list_id.clone(), list_version, index);
+    println!("[set_playlist_index] Set active playback: list_id={:?}, version={}, index={}", list_id, list_version, index);
 
     let video = results[index].clone();
     let has_next = index + 1 < results.len();
-    
-    println!("[set_playlist_index] Emitting video-selected: video_id={}, index={}, has_next={}, playlist_type={:?}", video.id, index, has_next, playlist_type);
+    let playlist_version = state.get_list_context_version(&list_id);
+
+    println!("[set_playlist_index] Emitting video-selected: video_id={}, index={}, has_next={}, playlist_type={:?}, playlist_version={}", video.id, index, has_next, playlist_type, playlist_version);
 
     app.emit("video-selected", VideoSelectedPayload {
         video,
         index,
         has_next,
         playlist_type,
+        playlist_version,
     }).map_err(|e| e.to_string())?;
 
     println!("[set_playlist_index] Event emitted successfully");
@@ -85,7 +135,7 @@ pub async fn update_playlist_video(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let playlist_type = *state.playlist_type.read();
-    
+
     let mut results = match playlist_type {
         PlaylistType::Search => state.search_results.write(),
         PlaylistType::History => state.history_results.write(),
@@ -156,9 +206,19 @@ pub async fn set_playback_settings(
 pub async fn get_search_state(
     state: tauri::State<'_, AppState>,
 ) -> Result<SearchState, String> {
-    let search_state = state.search_state.read().clone();
+    let mut search_state = state.search_state.read().clone();
+    // Sync all relevant fields from list_context (the authoritative source)
+    if let Some(list_context) = state.get_list_context(&ListContextId::Search) {
+        search_state.version = list_context.version;
+        search_state.page = list_context.page;
+        search_state.has_next = list_context.has_next;
+        search_state.total_count = list_context.total_count;
+        search_state.sort = list_context.sort.clone();
+        println!("[get_search_state] Synced from list_context: version={}, page={}, sort={:?}", search_state.version, search_state.page, search_state.sort);
+    }
     Ok(search_state)
 }
+
 
 #[tauri::command]
 pub async fn set_search_state(
@@ -177,42 +237,78 @@ pub async fn set_search_state(
 #[tauri::command]
 pub async fn load_more(
     app: AppHandle,
+    requested_playlist_type: Option<PlaylistType>,
+    expected_version: Option<u64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SearchResponse, String> {
-    // Get current search state
-    let search_state = state.search_state.read().clone();
+    let requested_playlist_type = requested_playlist_type.unwrap_or(PlaylistType::Search);
+    let list_id = ListContextId::from(requested_playlist_type);
+    
+    // Get list context (the authoritative source for browsing state)
+    let list_context = state.get_list_context(&list_id);
+    
+    // Validate version matches
+    let current_version = list_context.as_ref().map(|c| c.version).unwrap_or(1);
+    let expected_version = expected_version.unwrap_or(current_version);
+    
+    println!("[load_more] list_id={:?}, version={}, expected_version={}", 
+        list_id, current_version, expected_version);
+
+    if current_version != expected_version {
+        println!("[load_more] Version mismatch: current={}, expected={}, rejecting", current_version, expected_version);
+        return Err("Stale load-more request: list context has changed".to_string());
+    }
+    
+    // Get browsing state from list_context
+    let context = match list_context {
+        Some(ctx) => ctx,
+        None => return Err("No list context found".to_string()),
+    };
+    
+    println!("[load_more] list_context.sort={:?}, list_context.page={}", 
+        context.sort, context.page);
     
     // Check if there are more results
-    if !search_state.has_next {
+    if !context.has_next {
         return Err("No more results to load".to_string());
     }
     
-    // Increment page and update state
-    let next_page = search_state.page + 1;
+    // Calculate next page
+    let next_page = context.page + 1;
+    
+    // Construct SearchRequest from list_context browsing state
+    let request = SearchRequest {
+        query: context.query.clone(),
+        page: next_page,
+        page_size: context.page_size,
+        exclude_watched: context.exclude_watched,
+        filters: context.filters.clone(),
+        sort: context.sort.clone(),
+        formula_filter: context.formula_filter.clone(),
+    };
+    
+    println!("[load_more] Executing search with page={}, sort={:?}", next_page, request.sort);
+    
+    // Execute search using helper (does not update any list_context)
+    let response = execute_search(&state, &request)?;
+    
+    // Append new items to list_context and update pagination state
+    state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
+    println!("[load_more] Extended list_context: page={}, has_next={}, new_items_count={}", next_page, response.has_next, response.results.len());
+    // Also sync search_state and search_results with list_context for restore compatibility
     {
         let mut ss = state.search_state.write();
         ss.page = next_page;
-    }
-    
-    // Construct SearchRequest from SearchState
-    let request = SearchRequest {
-        query: search_state.query.clone(),
-        page: next_page,
-        page_size: search_state.page_size,
-        exclude_watched: search_state.exclude_watched,
-        filters: search_state.filters.clone(),
-        sort: search_state.sort.clone(),
-        formula_filter: search_state.formula_filter.clone(),
-    };
-    
-    // Execute search using helper
-    let response = execute_search(&state, &request)?;
-    
-    // Update search state with new has_next
-    {
-        let mut ss = state.search_state.write();
         ss.has_next = response.has_next;
-        ss.total_count = response.total;
+        ss.version = current_version;
+        // Sync results from list_context so restore works correctly when playback is on another list
+        ss.results = state.list_contexts.read().get(&list_id).map(|c| c.items.clone()).unwrap_or_default();
+        println!("[load_more] Synced search_state: page={}, version={}, results_count={}", ss.page, ss.version, ss.results.len());
+    }
+    {
+        let mut results_lock = state.search_results.write();
+        results_lock.extend(response.results.clone());
+        println!("[load_more] Updated search_results: total_count={}", results_lock.len());
     }
     
     // Emit event for UI update
@@ -225,7 +321,10 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     let conn = state.db.connect().map_err(|e| e.to_string())?;
     
     let mut sql = String::from(
-        "SELECT v.id, v.title, v.thumbnail_url, v.watch_url,          v.view_count, v.comment_count, v.mylist_count, v.like_count,          v.start_time, v.tags, v.duration, v.uploader_id, v.uploader_name, v.description          FROM videos v"
+        "SELECT v.id, v.title, v.thumbnail_url, v.watch_url, \
+         v.view_count, v.comment_count, v.mylist_count, v.like_count, \
+         v.start_time, v.tags, v.duration, v.uploader_id, v.uploader_name, v.description \
+         FROM videos v"
     );
     
     let mut count_sql = String::from("SELECT COUNT(*) as total FROM videos v");
@@ -350,17 +449,9 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     .collect();
     
     let has_next = (request.page * request.page_size) < total;
-
-    {
-        let mut results_lock = state.search_results.write();
-        if request.page == 1 {
-            *results_lock = results.clone();
-            let mut index_lock = state.playlist_index.write();
-            *index_lock = 0;
-        } else {
-            results_lock.extend(results.clone());
-        }
-    }
+    
+    // Note: This function only returns results. The caller is responsible for updating list_context.
+    // This ensures each list (Search, History, WatchLater) can manage its own state.
     
     Ok(SearchResponse {
         total,
@@ -381,7 +472,19 @@ pub async fn search(
     request: SearchRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<SearchResponse, String> {
+    println!("[search] Called with page={}, sort={:?}", request.page, request.sort);
+    
+    // For new searches (page 1), reserve version upfront to invalidate in-flight load_more
+    let reserved_version = if request.page == 1 {
+        let v = state.reserve_list_context_version(&ListContextId::Search);
+        println!("[search] Reserved version {} for new search", v);
+        Some(v)
+    } else {
+        None
+    };
+    
     let conn = state.db.connect().map_err(|e| e.to_string())?;
+
     
     let mut sql = String::from(
         "SELECT v.id, v.title, v.thumbnail_url, v.watch_url, \
@@ -537,6 +640,47 @@ pub async fn search(
     
     let has_next = (request.page * request.page_size) < total;
 
+    // Update list_context for the new list-context model
+    let list_version = if let Some(v) = reserved_version {
+        // Use finalize for reserved version (page 1)
+        let success = state.finalize_list_context_search(
+            ListContextId::Search,
+            v,
+            results.clone(),
+            request.page,
+            request.page_size,
+            has_next,
+            total,
+            request.query.clone(),
+            request.sort.clone(),
+            request.filters.clone(),
+            request.exclude_watched,
+            request.formula_filter.clone(),
+        );
+        if success {
+            println!("[search] Finalized list_context with version {}", v);
+            v
+        } else {
+            println!("[search] WARNING: Failed to finalize, version changed");
+            state.get_list_context_version(&ListContextId::Search)
+        }
+    } else {
+        // For pagination (page > 1), use update_list_context which appends items
+        state.update_list_context(
+            ListContextId::Search,
+            results.clone(),
+            request.page,
+            request.page_size,
+            has_next,
+            total,
+            request.query.clone(),
+            request.sort.clone(),
+            request.filters.clone(),
+            request.exclude_watched,
+            request.formula_filter.clone(),
+        )
+    };
+
     // Update search_state when starting a new search (page 1)
     if request.page == 1 {
         let mut ss = state.search_state.write();
@@ -549,19 +693,28 @@ pub async fn search(
         ss.page_size = request.page_size;
         ss.has_next = has_next;
         ss.total_count = total;
+        ss.version = list_version;
+        ss.results = results.clone();
+        
+        // Clear active playback for Search when query changes
+        state.clear_active_playback_for_list(&ListContextId::Search);
+        println!("[search] Updated search_state: sort={:?}, page=1, version={}", ss.sort, ss.version);
     } else {
         // Update pagination state for subsequent pages
         let mut ss = state.search_state.write();
         ss.page = request.page;
         ss.has_next = has_next;
+        ss.results = state.search_results.read().clone();
+        ss.version = list_version;
+        println!("[search] Updated search_state for pagination: page={}, version={}", ss.page, ss.version);
     }
 
+
+    // Also update legacy search_results for backwards compatibility
     {
         let mut results_lock = state.search_results.write();
         if request.page == 1 {
             *results_lock = results.clone();
-            let mut index_lock = state.playlist_index.write();
-            *index_lock = 0;
         } else {
             results_lock.extend(results.clone());
         }
@@ -849,6 +1002,60 @@ pub async fn get_history(
         is_watched: true,
     }).collect();
     
+    let has_next = (page * page_size) < total;
+    let requested_sort = sort_direction.clone().unwrap_or_else(|| "desc".to_string());
+    
+    // Update History list_context
+    if page == 1 {
+        // Reserve version and update list_context for new history view
+        let sort_config = crate::models::SortConfig {
+            by: "watched_at".to_string(),
+            direction: requested_sort.clone(),
+            weights: None,
+        };
+        
+        let mut contexts = state.list_contexts.write();
+        let context = contexts.entry(ListContextId::History).or_default();
+        
+        // Check if sort changed to bump version
+        let should_bump = context.sort.as_ref().map(|s| s.direction != requested_sort).unwrap_or(true);
+        if should_bump {
+            context.version += 1;
+            // Clear active playback if History was playing
+            drop(contexts);
+            state.clear_active_playback_for_list(&ListContextId::History);
+            contexts = state.list_contexts.write();
+        }
+        
+        let context = contexts.get_mut(&ListContextId::History).unwrap();
+        context.id = ListContextId::History;
+        context.items = results.clone();
+        context.page = page;
+        context.page_size = page_size;
+        context.has_next = has_next;
+        context.total_count = total;
+        context.sort = Some(sort_config);
+        // Note: version already bumped above if sort changed
+        let current_version = context.version;
+        
+        // Also update legacy history_state
+        let mut history_state = state.history_state.write();
+        history_state.sort_direction = requested_sort.clone();
+        history_state.page = page;
+        history_state.page_size = page_size;
+        history_state.total_count = total;
+        history_state.version = current_version;
+    } else {
+        // Append items for pagination
+        let mut contexts = state.list_contexts.write();
+        if let Some(context) = contexts.get_mut(&ListContextId::History) {
+            context.items.extend(results.clone());
+            context.page = page;
+            context.has_next = has_next;
+        }
+    }
+
+    // Update legacy history_results
     {
         let mut state_results = state.history_results.write();
         if page == 1 {
@@ -857,9 +1064,7 @@ pub async fn get_history(
             state_results.extend(results);
         }
     }
-    
-    let has_next = (page * page_size) < total;
-    
+
     Ok(HistoryResponse {
         total,
         page,
@@ -1105,14 +1310,9 @@ pub async fn open_pip_window(
 ) -> Result<(), String> {
     let playlist_type = *state.playlist_type.read();
     let current_index = *state.playlist_index.read();
-    
-    // Get results based on playlist type
-    let results = match playlist_type {
-        PlaylistType::Search => state.search_results.read().clone(),
-        PlaylistType::History => state.history_results.read().clone(),
-        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
-    };
-    let current_video = results.get(current_index).cloned();
+
+    let results = playlist_results_for_type(&state, playlist_type);
+    let current_video = current_index.and_then(|index| results.get(index).cloned());
     
     let saved_state = crate::database::load_pip_window_state(&app);
     let width = saved_state.as_ref().map(|s| s.width as f64).unwrap_or(450.0);
@@ -1144,13 +1344,14 @@ pub async fn open_pip_window(
         
         let window = builder.build().map_err(|e| e.to_string())?;
 
-        if let Some(video) = current_video {
-            let has_next = current_index + 1 < results.len();
+        if let (Some(video), Some(index)) = (current_video.clone(), current_index) {
+            let has_next = index + 1 < results.len();
             window.emit("video-selected", VideoSelectedPayload {
                 video,
-                index: current_index,
+                index,
                 has_next,
                 playlist_type,
+                playlist_version: playlist_version_for_type(&state, playlist_type),
             }).map_err(|e| e.to_string())?;
         }
         
@@ -1181,13 +1382,14 @@ pub async fn open_pip_window(
         
         let window = builder.build().map_err(|e| e.to_string())?;
 
-        if let Some(video) = current_video {
-            let has_next = current_index + 1 < results.len();
+        if let (Some(video), Some(index)) = (current_video.clone(), current_index) {
+            let has_next = index + 1 < results.len();
             window.emit("video-selected", VideoSelectedPayload {
                 video,
-                index: current_index,
+                index,
                 has_next,
                 playlist_type,
+                playlist_version: playlist_version_for_type(&state, playlist_type),
             }).map_err(|e| e.to_string())?;
         }
         
@@ -1255,17 +1457,16 @@ pub async fn play_next(
 ) -> Result<Option<Video>, String> {
     let playlist_type = *state.playlist_type.read();
     let mut index = state.playlist_index.write();
-    
-    // Get results based on playlist type
-    let results = match playlist_type {
-        PlaylistType::Search => state.search_results.read().clone(),
-        PlaylistType::History => state.history_results.read().clone(),
-        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
+    let results = playlist_results_for_type(&state, playlist_type);
+
+    let Some(current_index) = *index else {
+        return Ok(None);
     };
-    
-    if *index + 1 < results.len() {
-        *index += 1;
-        Ok(Some(results[*index].clone()))
+
+    if current_index + 1 < results.len() {
+        let next_index = current_index + 1;
+        *index = Some(next_index);
+        Ok(Some(results[next_index].clone()))
     } else {
         Ok(None)
     }
@@ -1277,16 +1478,16 @@ pub async fn play_previous(
 ) -> Result<Option<Video>, String> {
     let playlist_type = *state.playlist_type.read();
     let mut index = state.playlist_index.write();
-    
-    if *index > 0 {
-        *index -= 1;
-        // Get results based on playlist type
-        let results = match playlist_type {
-            PlaylistType::Search => state.search_results.read().clone(),
-            PlaylistType::History => state.history_results.read().clone(),
-            PlaylistType::WatchLater => state.watch_later_results.read().clone(),
-        };
-        Ok(Some(results[*index].clone()))
+
+    let Some(current_index) = *index else {
+        return Ok(None);
+    };
+
+    if current_index > 0 {
+        let previous_index = current_index - 1;
+        *index = Some(previous_index);
+        let results = playlist_results_for_type(&state, playlist_type);
+        Ok(Some(results[previous_index].clone()))
     } else {
         Ok(None)
     }
@@ -1445,6 +1646,58 @@ pub async fn get_watch_later(
         is_watched: false,
     }).collect();
     
+    let has_next = (page * page_size) < total;
+    let requested_sort = sort_direction.clone().unwrap_or_else(|| "desc".to_string());
+    
+    // Update WatchLater list_context
+    if page == 1 {
+        let sort_config = crate::models::SortConfig {
+            by: "added_at".to_string(),
+            direction: requested_sort.clone(),
+            weights: None,
+        };
+        
+        let mut contexts = state.list_contexts.write();
+        let context = contexts.entry(ListContextId::WatchLater).or_default();
+        
+        // Check if sort changed to bump version
+        let should_bump = context.sort.as_ref().map(|s| s.direction != requested_sort).unwrap_or(true);
+        if should_bump {
+            context.version += 1;
+            // Clear active playback if WatchLater was playing
+            drop(contexts);
+            state.clear_active_playback_for_list(&ListContextId::WatchLater);
+            contexts = state.list_contexts.write();
+        }
+        
+        let context = contexts.get_mut(&ListContextId::WatchLater).unwrap();
+        context.id = ListContextId::WatchLater;
+        context.items = results_for_state.clone();
+        context.page = page;
+        context.page_size = page_size;
+        context.has_next = has_next;
+        context.total_count = total;
+        context.sort = Some(sort_config);
+        let current_version = context.version;
+        
+        // Also update legacy watch_later_state
+        let mut watch_later_state = state.watch_later_state.write();
+        watch_later_state.sort_direction = requested_sort;
+        watch_later_state.page = page;
+        watch_later_state.page_size = page_size;
+        watch_later_state.total_count = total;
+        watch_later_state.version = current_version;
+    } else {
+        // Append items for pagination
+        let mut contexts = state.list_contexts.write();
+        if let Some(context) = contexts.get_mut(&ListContextId::WatchLater) {
+            context.items.extend(results_for_state.clone());
+            context.page = page;
+            context.has_next = has_next;
+        }
+    }
+
+    // Update legacy watch_later_results
     {
         let mut state_results = state.watch_later_results.write();
         if page == 1 {
@@ -1453,9 +1706,7 @@ pub async fn get_watch_later(
             state_results.extend(results_for_state);
         }
     }
-    
-    let has_next = (page * page_size) < total;
-    
+
     Ok(WatchLaterResponse {
         total,
         page,
@@ -1471,14 +1722,23 @@ pub async fn get_watch_later_count(
 ) -> Result<usize, String> {
     state.db.get_watch_later_count().map_err(|e| e.to_string())
 }
-
 // ===== State Management Commands =====
 
 #[tauri::command]
 pub async fn get_history_state(
     state: tauri::State<'_, AppState>,
 ) -> Result<HistoryState, String> {
-    let history_state = state.history_state.read().clone();
+    let mut history_state = state.history_state.read().clone();
+    // Sync all relevant fields from list_context (the authoritative source)
+    if let Some(list_context) = state.get_list_context(&ListContextId::History) {
+        history_state.version = list_context.version;
+        history_state.page = list_context.page;
+        history_state.has_next = list_context.has_next;
+        history_state.total_count = list_context.total_count;
+        if let Some(ref sort) = list_context.sort {
+            history_state.sort_direction = sort.direction.clone();
+        }
+    }
     Ok(history_state)
 }
 
@@ -1490,7 +1750,8 @@ pub async fn set_history_state(
 ) -> Result<(), String> {
     {
         let mut current = state.history_state.write();
-        *current = history_state;
+        let version = current.version;
+        *current = HistoryState { version, ..history_state };
     }
     app.emit("history-state-changed", &state.history_state.read().clone()).map_err(|e| e.to_string())?;
     Ok(())
@@ -1500,7 +1761,17 @@ pub async fn set_history_state(
 pub async fn get_watch_later_state(
     state: tauri::State<'_, AppState>,
 ) -> Result<WatchLaterState, String> {
-    let watch_later_state = state.watch_later_state.read().clone();
+    let mut watch_later_state = state.watch_later_state.read().clone();
+    // Sync all relevant fields from list_context (the authoritative source)
+    if let Some(list_context) = state.get_list_context(&ListContextId::WatchLater) {
+        watch_later_state.version = list_context.version;
+        watch_later_state.page = list_context.page;
+        watch_later_state.has_next = list_context.has_next;
+        watch_later_state.total_count = list_context.total_count;
+        if let Some(ref sort) = list_context.sort {
+            watch_later_state.sort_direction = sort.direction.clone();
+        }
+    }
     Ok(watch_later_state)
 }
 
@@ -1512,7 +1783,8 @@ pub async fn set_watch_later_state(
 ) -> Result<(), String> {
     {
         let mut current = state.watch_later_state.write();
-        *current = watch_later_state;
+        let version = current.version;
+        *current = WatchLaterState { version, ..watch_later_state };
     }
     app.emit("watch-later-state-changed", &state.watch_later_state.read().clone()).map_err(|e| e.to_string())?;
     Ok(())

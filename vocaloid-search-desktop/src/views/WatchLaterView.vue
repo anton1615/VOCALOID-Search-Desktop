@@ -3,10 +3,9 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
-import PlayerColumn from '../components/PlayerColumn.vue'
 import { formatDateTime } from '../utils/dateTime'
 import { mapWatchLaterEntryToVideo } from '../utils/playlistPlaceholders'
-import { createHydratedCurrentVideo, getInitialPlaylistViewState } from '../features/playlistViews/playlistViewState'
+import { createHydratedCurrentVideo, getInitialPlaylistViewState, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
 import { createPagedPlaylistController } from '../features/playlistViews/pagedPlaylistController'
 
 const { t } = useI18n()
@@ -29,13 +28,6 @@ const searchQuery = ref('')
 const sortOrder = ref<'desc' | 'asc'>('desc')
 
 const pipActive = ref(false)
-
-const PLAY_NEXT_COOLDOWN = 1000
-let lastPlayNextTime = 0
-
-const listWidth = ref(40)
-const isDragging = ref(false)
-const viewRef = ref<HTMLElement | null>(null)
 
 const watchLaterController = createPagedPlaylistController({
   initialPage: page.value,
@@ -85,7 +77,6 @@ function formatAddedAt(dateStr: string): string {
 async function loadWatchLater() {
   loading.value = true
   try {
-    await api.setPlaylistType('WatchLater')
     watchLaterController.setSortOrder(sortOrder.value)
     const snapshot = await watchLaterController.loadFirstPage()
     syncWatchLaterSnapshot(snapshot)
@@ -157,40 +148,9 @@ async function hydrateCurrentVideo(video: Video, index: number) {
 
 async function playVideo(video: Video, index: number) {
   currentVideoIndex.value = index
+  await api.setPlaylistType('WatchLater')
   await api.setPlaylistIndex(index)
   await hydrateCurrentVideo(video, index)
-}
-
-async function playNext() {
-  const now = Date.now()
-  if (now - lastPlayNextTime < PLAY_NEXT_COOLDOWN) return
-  lastPlayNextTime = now
-  
-  if (currentVideoIndex.value >= 0 && currentVideoIndex.value < results.value.length - 1) {
-    await playVideo(results.value[currentVideoIndex.value + 1], currentVideoIndex.value + 1)
-  }
-}
-
-async function playPrevious() {
-  if (currentVideoIndex.value > 0) {
-    await playVideo(results.value[currentVideoIndex.value - 1], currentVideoIndex.value - 1)
-  }
-}
-
-function handleVideoWatched(video: Video) {
-  if (currentVideo.value?.id === video.id) {
-    currentVideo.value = video
-  }
-}
-
-async function openPip() {
-  if (!currentVideo.value) return
-  pipActive.value = true
-  await api.openPipWindow()
-}
-
-function closePip() {
-  pipActive.value = false
 }
 
 async function removeFromList(videoId: string) {
@@ -205,26 +165,6 @@ async function removeFromList(videoId: string) {
   } catch (e) {
     console.error('Failed to remove from watch later:', e)
   }
-}
-
-// Resize divider
-function startDrag(_e: MouseEvent) {
-  isDragging.value = true
-  document.addEventListener('mousemove', onDrag)
-  document.addEventListener('mouseup', stopDrag)
-}
-
-function onDrag(e: MouseEvent) {
-  if (!isDragging.value || !viewRef.value) return
-  const rect = viewRef.value.getBoundingClientRect()
-  const newWidth = ((e.clientX - rect.left) / rect.width) * 100
-  listWidth.value = Math.min(60, Math.max(25, newWidth))
-}
-
-function stopDrag() {
-  isDragging.value = false
-  document.removeEventListener('mousemove', onDrag)
-  document.removeEventListener('mouseup', stopDrag)
 }
 
 // Infinite scroll
@@ -250,8 +190,6 @@ let unlistenVideoSelected: (() => void) | null = null
 let unlistenWatchLaterChanged: (() => void) | null = null
 
 onMounted(async () => {
-  await api.setPlaylistType('WatchLater')
-  
   // Restore view state, but always reload fresh list from DB instead of trusting stale Rust playlist entries
   try {
     const playlistState = await api.getPlaylistState()
@@ -267,8 +205,10 @@ onMounted(async () => {
     
     const initialViewState = getInitialPlaylistViewState({
       expectedPlaylistType: 'WatchLater',
+      expectedPlaylistVersion: watchLaterState.version,
       playlistType: playlistState.playlist_type,
-      playlistIndex: playlistState.index,
+      playlistVersion: playlistState.playlist_version,
+      playlistIndex: playlistState.index ?? -1,
       results: results.value,
     })
 
@@ -284,6 +224,15 @@ onMounted(async () => {
   
   unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
     const payload = event.payload
+    const latestPlaylistState = await api.getPlaylistState()
+    if (
+      !shouldApplyPlaylistSelection('WatchLater', payload) ||
+      !shouldApplyPlaylistSelectionVersion(latestPlaylistState.playlist_version, payload)
+    ) {
+      currentVideo.value = null
+      currentVideoIndex.value = -1
+      return
+    }
     currentVideoIndex.value = payload.index
     
     const baseVideo = results.value[payload.index] ?? payload.video
@@ -335,7 +284,8 @@ onUnmounted(() => {
     total_count: totalCount.value,
     has_next: hasNext.value,
     sort_direction: sortOrder.value,
-    search_query: searchQuery.value
+    search_query: searchQuery.value,
+    version: 0,
   }).catch(e => console.error('[WatchLaterView] Failed to save state:', e))
 })
 
@@ -353,8 +303,8 @@ function toggleSortOrder() {
 </script>
 
 <template>
-  <div class="watch-later-view" ref="viewRef">
-    <div class="list-column" :style="{ width: `${listWidth}%`, minWidth: '320px', maxWidth: '60%' }">
+  <div class="watch-later-view">
+    <div class="list-column">
       <div class="header">
         <h2>❤️ {{ t('watchLater.title') }}</h2>
         <span class="count">{{ totalCount.toLocaleString() }} {{ t('watchLater.videos') }}</span>
@@ -408,33 +358,15 @@ function toggleSortOrder() {
         </div>
       </div>
     </div>
-    
-    <div 
-      class="resize-divider" 
-      @mousedown="startDrag"
-      :class="{ dragging: isDragging }"
-    ></div>
-    
-    <PlayerColumn
-      :current-video="currentVideo"
-      :current-video-index="currentVideoIndex"
-      :results-count="results.length"
-      :has-next="hasNext"
-      :pip-active="pipActive"
-      :show-auto-skip="false"
-      @play-next="playNext"
-      @play-previous="playPrevious"
-      @open-pip="openPip"
-      @close-pip="closePip"
-      @video-watched="handleVideoWatched"
-    />
   </div>
 </template>
 
 <style scoped>
 .watch-later-view {
   display: flex;
+  flex-direction: column;
   height: 100%;
+  min-width: 0;
   background: var(--color-bg-primary);
 }
 

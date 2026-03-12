@@ -28,14 +28,27 @@ export function resolveSearchRestoreState(
     }
   }
 
+  const hasActiveSearchPlayback =
+    playlistState.playlist_type === 'Search' &&
+    playlistState.playlist_version === searchState.version
+  const activeIndex = playlistState.index
+  const hasValidSearchSelection =
+    hasActiveSearchPlayback &&
+    activeIndex !== null &&
+    activeIndex >= 0 &&
+    activeIndex < playlistState.results.length
+
+  const browsingResults = hasActiveSearchPlayback
+    ? playlistState.results
+    : searchState.results ?? []
+
   return {
     shouldRunInitialSearch: false,
-    results: playlistState.results,
-    currentVideo:
-      playlistState.index >= 0 && playlistState.index < playlistState.results.length
-        ? playlistState.results[playlistState.index]
-        : null,
-    currentVideoIndex: playlistState.index,
+    results: browsingResults,
+    currentVideo: hasValidSearchSelection && activeIndex !== null
+      ? playlistState.results[activeIndex]
+      : null,
+    currentVideoIndex: hasValidSearchSelection && activeIndex !== null ? activeIndex : -1,
     hasNext: searchState.has_next,
     totalCount: searchState.total_count,
     page: searchState.page,

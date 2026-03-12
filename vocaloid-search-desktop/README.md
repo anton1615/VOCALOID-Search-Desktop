@@ -2,6 +2,25 @@
 
 A desktop application for searching VOCALOID videos from Niconico.
 
+## Release Notes
+
+### v1.5.0 (2025-03-12)
+
+#### Playlist State Synchronization Fix
+
+- **Fixed "gap" issue**: Resolved incorrect ordering at the 51st video when loading more results after switching between Search, History, and Watch Later views
+- **Independent playback state**: Playing video continues across page switches until you explicitly select a new video from another list
+- **Version control**: Added list context versioning to prevent data corruption from concurrent load requests
+- **Backward compatible**: Legacy fields preserved for smooth upgrades
+
+#### Technical Improvements
+
+- Refactored Rust state management with `ListContext` and `ActivePlayback` models
+- Frontend restore logic now reads from `list_context` for data consistency
+- Added version reservation mechanism to invalidate concurrent `load_more` requests
+
+---
+
 ## Features
 
 - Search videos with advanced filters (views, mylists, comments, likes, date range)

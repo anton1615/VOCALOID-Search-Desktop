@@ -92,6 +92,212 @@ impl AppState {
             watch_later_state: Arc::new(RwLock::new(WatchLaterState::default())),
         }
     }
+    /// Get or create a list context for the given list ID
+    pub fn get_or_create_list_context(&self, list_id: ListContextId) -> ListContext {
+        let contexts = self.list_contexts.read();
+        contexts.get(&list_id).cloned().unwrap_or_default()
+    }
+
+
+    /// Update a list context with new items and browsing state
+    /// If page == 1, replaces items, increments version, and updates browsing state
+    /// If page > 1, appends items (version and browsing state unchanged)
+    pub fn update_list_context(
+        &self,
+        list_id: ListContextId,
+        items: Vec<Video>,
+        page: usize,
+        page_size: usize,
+        has_next: bool,
+        total_count: usize,
+        query: String,
+        sort: Option<crate::models::SortConfig>,
+        filters: Option<crate::models::Filters>,
+        exclude_watched: bool,
+        formula_filter: Option<crate::models::FormulaFilter>,
+    ) -> u64 {
+        let mut contexts = self.list_contexts.write();
+        let context = contexts.entry(list_id.clone()).or_default();
+        
+        if page == 1 {
+            // New search - increment version and replace items and browsing state
+            context.version += 1;
+            context.items = items;
+            context.query = query;
+            context.sort = sort;
+            context.filters = filters;
+            context.exclude_watched = exclude_watched;
+            context.formula_filter = formula_filter;
+        } else {
+            // Pagination - append items (version and browsing state unchanged)
+            context.items.extend(items);
+        }
+        context.page = page;
+        context.page_size = page_size;
+        context.has_next = has_next;
+        context.total_count = total_count;
+        context.version
+    }
+
+
+    /// Increment list context version (for sort/filter changes)
+    /// Returns the new version
+    pub fn bump_list_context_version(&self, list_id: &ListContextId) -> u64 {
+        let mut contexts = self.list_contexts.write();
+        if let Some(context) = contexts.get_mut(list_id) {
+            context.version += 1;
+            context.items.clear();
+            context.page = 1;
+            context.has_next = false;
+            context.version
+        } else {
+            1
+        }
+    }
+    
+    /// Get the list context for a given list ID
+    pub fn get_list_context(&self, list_id: &ListContextId) -> Option<ListContext> {
+        let contexts = self.list_contexts.read();
+        contexts.get(list_id).cloned()
+    }
+
+
+    /// Set active playback to a specific list and index
+    pub fn set_active_playback(&self, list_id: ListContextId, list_version: u64, index: usize) {
+        let mut playback = self.active_playback.write();
+        *playback = Some(ActivePlayback {
+            list_id,
+            list_version,
+            current_index: index,
+            is_playing: true,
+        });
+    }
+
+    /// Clear active playback
+    pub fn clear_active_playback(&self) {
+        let mut playback = self.active_playback.write();
+        *playback = None;
+    }
+
+    /// Clear active playback if it belongs to the specified list
+    pub fn clear_active_playback_for_list(&self, list_id: &ListContextId) {
+        let mut playback = self.active_playback.write();
+        if let Some(ref p) = *playback {
+            if &p.list_id == list_id {
+                *playback = None;
+            }
+        }
+    }
+    /// Update list context pagination state after load_more
+    /// This only updates page and has_next, does not modify items or version
+    pub fn update_list_context_pagination(&self, list_id: &ListContextId, page: usize, has_next: bool) {
+        let mut contexts = self.list_contexts.write();
+        if let Some(context) = contexts.get_mut(list_id) {
+            context.page = page;
+            context.has_next = has_next;
+        }
+    }
+
+    /// Extend list context items after load_more
+    /// This appends new items and updates pagination state, validating version
+    /// Returns true if successful, false if version mismatch
+    pub fn extend_list_context_items(
+        &self,
+        list_id: &ListContextId,
+        expected_version: u64,
+        new_items: Vec<Video>,
+        page: usize,
+        has_next: bool,
+    ) -> bool {
+        let mut contexts = self.list_contexts.write();
+        if let Some(context) = contexts.get_mut(list_id) {
+            // Verify version hasn't changed
+            if context.version != expected_version {
+                println!("[extend_list_context_items] Version mismatch: expected={}, actual={}", expected_version, context.version);
+                return false;
+            }
+            context.items.extend(new_items);
+            context.page = page;
+            context.has_next = has_next;
+            return true;
+        }
+        false
+    }
+
+    /// Finalize a list context after search completes
+    /// This updates items and browsing state without incrementing version
+    /// The version must match the reserved version from reserve_list_context_version
+    pub fn finalize_list_context_search(
+        &self,
+        list_id: ListContextId,
+        reserved_version: u64,
+        items: Vec<Video>,
+        page: usize,
+        page_size: usize,
+        has_next: bool,
+        total_count: usize,
+        query: String,
+        sort: Option<crate::models::SortConfig>,
+        filters: Option<crate::models::Filters>,
+        exclude_watched: bool,
+        formula_filter: Option<crate::models::FormulaFilter>,
+    ) -> bool {
+        let mut contexts = self.list_contexts.write();
+        if let Some(context) = contexts.get_mut(&list_id) {
+            // Verify version hasn't changed
+            if context.version != reserved_version {
+                println!("[finalize_list_context_search] Version mismatch: expected={}, actual={}", reserved_version, context.version);
+                return false;
+            }
+            context.items = items;
+            context.page = page;
+            context.page_size = page_size;
+            context.has_next = has_next;
+            context.total_count = total_count;
+            context.query = query;
+            context.sort = sort;
+            context.filters = filters;
+            context.exclude_watched = exclude_watched;
+            context.formula_filter = formula_filter;
+            return true;
+        }
+        false
+    }
+
+    /// Reserve a new version for a list context at the start of a search
+    /// This invalidates any in-flight load_more requests
+    /// Returns the new reserved version
+    pub fn reserve_list_context_version(&self, list_id: &ListContextId) -> u64 {
+        let mut contexts = self.list_contexts.write();
+        let context = contexts.entry(list_id.clone()).or_default();
+        context.version += 1;
+        context.items.clear();
+        context.page = 1;
+        context.has_next = false;
+        context.version
+    }
+
+
+
+    /// Update active playback index
+    pub fn set_active_playback_index(&self, index: usize) {
+        let mut playback = self.active_playback.write();
+        if let Some(ref mut p) = *playback {
+            p.current_index = index;
+        }
+    }
+
+    /// Get the current list context version
+    pub fn get_list_context_version(&self, list_id: &ListContextId) -> u64 {
+        let contexts = self.list_contexts.read();
+        contexts.get(list_id).map(|c| c.version).unwrap_or(1)
+    }
+
+    /// Get list context items
+    pub fn get_list_context_items(&self, list_id: &ListContextId) -> Vec<Video> {
+        let contexts = self.list_contexts.read();
+        contexts.get(list_id).map(|c| c.items.clone()).unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserInfo {
     pub user_id: Option<String>,
     pub user_nickname: Option<String>,
     pub user_icon_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub video_id: String,
     pub title: String,
@@ -15,7 +15,7 @@ pub struct HistoryEntry {
     pub watched_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WatchLaterEntry {
     pub video_id: String,
     pub title: String,
@@ -35,7 +35,101 @@ impl Default for PlaylistType {
         PlaylistType::Search
     }
 }
+
+/// Unique identifier for a list context.
+/// Supports built-in lists (Search, History, WatchLater) and future custom lists.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ListContextId {
+    Search,
+    History,
+    WatchLater,
+    Custom(String),
+}
+
+impl From<PlaylistType> for ListContextId {
+    fn from(playlist_type: PlaylistType) -> Self {
+        match playlist_type {
+            PlaylistType::Search => ListContextId::Search,
+            PlaylistType::History => ListContextId::History,
+            PlaylistType::WatchLater => ListContextId::WatchLater,
+        }
+    }
+}
+
+impl From<&ListContextId> for PlaylistType {
+    fn from(id: &ListContextId) -> Self {
+        match id {
+            ListContextId::Search => PlaylistType::Search,
+            ListContextId::History => PlaylistType::History,
+            ListContextId::WatchLater => PlaylistType::WatchLater,
+            ListContextId::Custom(_) => PlaylistType::Search, // Default fallback for custom lists
+        }
+    }
+}
+
+/// A browseable list context that stores its own browsing state, loaded items,
+/// pagination progress, and version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListContext {
+    /// Unique identifier for this list
+    pub id: ListContextId,
+    /// Loaded video items
+    pub items: Vec<Video>,
+    /// Current page number (1-indexed)
+    pub page: usize,
+    /// Items per page
+    pub page_size: usize,
+    /// Whether more items are available
+    pub has_next: bool,
+    /// Total count of items (if known)
+    pub total_count: usize,
+    /// Monotonically increasing version, incremented when result set changes
+    pub version: u64,
+    /// Search query
+    pub query: String,
+    /// Sort configuration
+    pub sort: Option<SortConfig>,
+    /// Filters
+    pub filters: Option<Filters>,
+    /// Exclude watched
+    pub exclude_watched: bool,
+    /// Formula filter
+    pub formula_filter: Option<FormulaFilter>,
+}
+
+impl Default for ListContext {
+    fn default() -> Self {
+        Self {
+            id: ListContextId::Search,
+            items: Vec::new(),
+            page: 1,
+            page_size: 50,
+            has_next: false,
+            total_count: 0,
+            version: 1,
+            query: String::new(),
+            sort: None,
+            filters: None,
+            exclude_watched: false,
+            formula_filter: None,
+        }
+    }
+}
+
+/// The single active playback reference that points to one list context and one item index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivePlayback {
+    /// The list context that owns playback
+    pub list_id: ListContextId,
+    /// The version of the list when playback started
+    pub list_version: u64,
+    /// Current item index within the list
+    pub current_index: usize,
+    /// Whether playback is currently active
+    pub is_playing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Video {
     pub id: String,
     pub title: String,
@@ -54,19 +148,19 @@ pub struct Video {
     pub is_watched: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NumericFilter {
     pub gte: Option<f64>,
     pub lte: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DateFilter {
     pub gte: Option<String>,
     pub lte: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Filters {
     pub view: Option<NumericFilter>,
     pub mylist: Option<NumericFilter>,
@@ -75,7 +169,7 @@ pub struct Filters {
     pub start_time: Option<DateFilter>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SortWeights {
     #[serde(default = "default_weight")]
     pub view: f64,
@@ -91,7 +185,7 @@ fn default_weight() -> f64 {
     1.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormulaFilter {
     pub view_weight: f64,
     pub mylist_weight: f64,
@@ -100,14 +194,14 @@ pub struct FormulaFilter {
     pub min_score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SortConfig {
     pub by: String,
     pub direction: String,
     pub weights: Option<SortWeights>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchRequest {
     #[serde(default)]
     pub query: String,
@@ -129,7 +223,7 @@ fn default_page_size() -> usize {
     50
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub total: usize,
     pub page: usize,
@@ -138,7 +232,7 @@ pub struct SearchResponse {
     pub results: Vec<Video>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryResponse {
     pub total: usize,
     pub page: usize,
@@ -147,7 +241,7 @@ pub struct HistoryResponse {
     pub results: Vec<HistoryEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WatchLaterResponse {
     pub total: usize,
     pub page: usize,
@@ -164,6 +258,7 @@ pub struct HistoryState {
     pub total_count: usize,
     pub sort_direction: String,
     pub search_query: String,
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -174,6 +269,7 @@ pub struct WatchLaterState {
     pub total_count: usize,
     pub sort_direction: String,
     pub search_query: String,
+    pub version: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScraperConfig {
@@ -200,13 +296,13 @@ fn default_category() -> Option<String> {
     Some("MUSIC".to_string())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseStats {
     pub total_videos: usize,
     pub last_update: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FreshnessCheck {
     pub is_fresh: bool,
     pub local_last_update: Option<String>,
@@ -214,20 +310,20 @@ pub struct FreshnessCheck {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StorageInfo {
     pub data_directory: String,
     pub database_size_kb: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncPreflightEstimate {
     pub estimated_video_count: Option<usize>,
     pub estimated_database_size_kb: Option<u64>,
     pub free_space_kb: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScraperProgress {
     pub is_running: bool,
     pub videos_fetched: usize,
@@ -235,7 +331,7 @@ pub struct ScraperProgress {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
     pub x: i32,
     pub y: i32,
@@ -256,16 +352,17 @@ impl Default for WindowState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaylistState {
     pub playlist_type: PlaylistType,
     pub results: Vec<Video>,
-    pub index: usize,
+    pub index: Option<usize>,
     pub has_next: bool,
     pub pip_active: bool,
+    pub playlist_version: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaybackSettings {
     pub auto_play: bool,
     pub auto_skip: bool,
@@ -283,17 +380,20 @@ pub struct SearchState {
     pub page_size: usize,
     pub has_next: bool,
     pub total_count: usize,
+    pub version: u64,
+    pub results: Vec<Video>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoSelectedPayload {
     pub video: Video,
     pub index: usize,
     pub has_next: bool,
     pub playlist_type: PlaylistType,
+    pub playlist_version: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PipWindowState {
     pub x: i32,
     pub y: i32,
@@ -312,7 +412,7 @@ impl Default for PipWindowState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[allow(non_snake_case)]
 pub struct SnapshotVideo {
     pub contentId: String,

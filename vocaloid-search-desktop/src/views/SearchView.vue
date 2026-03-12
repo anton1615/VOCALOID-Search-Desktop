@@ -4,11 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
-import PlayerColumn from '../components/PlayerColumn.vue'
 import UploaderAvatar from '../components/UploaderAvatar.vue'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
 import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
+import { shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
 import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
@@ -64,16 +64,9 @@ const hasActiveFilters = computed(() => {
 })
 
 const pipActive = ref(false)
-
-const PLAY_NEXT_COOLDOWN = 1000
-let lastPlayNextTime = 0
-
 const modalMouseDownOnBackdrop = ref(false)
-
-const listWidth = ref(40)
-const isDragging = ref(false)
-const searchViewRef = ref<HTMLElement | null>(null)
 const sortDropdownRef = ref<HTMLElement | null>(null)
+const listContainerRef = ref<HTMLElement | null>(null)
 
 function saveSearchState() {
   const state = createSearchPersistenceState({
@@ -174,7 +167,8 @@ async function loadMore() {
   loadingMore.value = true
   
   try {
-    const response = await api.loadMore()
+    const searchState = await api.getSearchState()
+    const response = await api.loadMore('Search', searchState.version)
     // Append new results from Rust
     results.value = [...results.value, ...response.results]
     page.value++
@@ -190,6 +184,7 @@ async function playVideo(video: Video) {
   console.log('[playVideo] Called with video:', video.id)
   const index = results.value.findIndex(v => v.id === video.id)
   if (index >= 0) {
+    await api.setPlaylistType('Search')
     await api.setPlaylistIndex(index)
     currentVideoIndex.value = index
     currentVideo.value = video
@@ -203,55 +198,6 @@ async function playVideo(video: Video) {
       })
     }
   }
-}
-
-async function playNext() {
-  const now = Date.now()
-  if (now - lastPlayNextTime < PLAY_NEXT_COOLDOWN) {
-    console.log('[playNext] Cooldown, skipping')
-    return
-  }
-  lastPlayNextTime = now
-
-  console.log('[playNext] Current index:', currentVideoIndex.value, 'Results length:', results.value.length)
-
-  if (currentVideoIndex.value < results.value.length - 1) {
-    console.log('[playNext] Calling setPlaylistIndex with:', currentVideoIndex.value + 1)
-    await api.setPlaylistIndex(currentVideoIndex.value + 1)
-  } else if (hasNext.value) {
-    console.log('[playNext] Loading more...')
-    await loadMore()
-    if (currentVideoIndex.value < results.value.length - 1) {
-      console.log('[playNext] After loadMore, calling setPlaylistIndex with:', currentVideoIndex.value + 1)
-      await api.setPlaylistIndex(currentVideoIndex.value + 1)
-    }
-  }
-}
-
-async function playPrevious() {
-  if (currentVideoIndex.value > 0) {
-    await api.setPlaylistIndex(currentVideoIndex.value - 1)
-  }
-}
-
-function handleVideoWatched(video: Video) {
-  if (currentVideo.value?.id === video.id) {
-    currentVideo.value = video
-  }
-}
-
-async function openPip() {
-  await api.openPipWindow()
-  pipActive.value = true
-}
-
-async function closePip() {
-  try {
-    await api.closePipWindow()
-  } catch (e) {
-    console.error('Failed to close PiP window:', e)
-  }
-  pipActive.value = false
 }
 
 async function openNicoPage(event: Event, video: Video) {
@@ -348,25 +294,6 @@ function cancelFormula() {
   localWeights.value = next.localWeights
 }
 
-function startDrag(_e: MouseEvent) {
-  isDragging.value = true
-  document.addEventListener('mousemove', onDrag)
-  document.addEventListener('mouseup', stopDrag)
-}
-
-function onDrag(e: MouseEvent) {
-  if (!isDragging.value || !searchViewRef.value) return
-  const rect = searchViewRef.value.getBoundingClientRect()
-  const newWidth = ((e.clientX - rect.left) / rect.width) * 100
-  listWidth.value = Math.max(30, Math.min(60, newWidth))
-}
-
-function stopDrag() {
-  isDragging.value = false
-  document.removeEventListener('mousemove', onDrag)
-  document.removeEventListener('mouseup', stopDrag)
-}
-
 function handleSortClickOutside(event: MouseEvent) {
   if (sortDropdownRef.value && !sortDropdownRef.value.contains(event.target as Node)) {
     showSortMenu.value = false
@@ -409,7 +336,6 @@ let unlistenVideoSelected: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
 
 onMounted(async () => {
-  await api.setPlaylistType('Search')
   loadSearchState()
   document.addEventListener('click', handleSortClickOutside)
   setupObserver()
@@ -447,8 +373,17 @@ onMounted(async () => {
     console.log('[SearchView] pipActive set to false')
   })
 
-  unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', (event) => {
+  unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
     const payload = event.payload
+    const latestPlaylistState = await api.getPlaylistState()
+    if (
+      !shouldApplyPlaylistSelection('Search', payload) ||
+      !shouldApplyPlaylistSelectionVersion(latestPlaylistState.playlist_version, payload)
+    ) {
+      currentVideo.value = null
+      currentVideoIndex.value = -1
+      return
+    }
     console.log('[SearchView] Received video-selected event:', payload.video.id, 'index:', payload.index)
     currentVideo.value = payload.video
     currentVideoIndex.value = payload.index
@@ -457,7 +392,7 @@ onMounted(async () => {
     const videoElement = document.getElementById('video-' + payload.index)
     const prevVideoElement = document.getElementById('video-' + (payload.index - 1))
     const nextNextVideoElement = document.getElementById('video-' + (payload.index + 2))
-    const listContainer = document.querySelector('.video-list')
+    const listContainer = listContainerRef.value
     
     if (listContainer) {
       const containerRect = listContainer.getBoundingClientRect()
@@ -540,8 +475,8 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
 </script>
 
 <template>
-  <div class="search-view" ref="searchViewRef">
-    <div class="list-column" :style="{ width: `${listWidth}%`, minWidth: '320px', maxWidth: '60%' }">
+  <div class="search-view">
+    <div class="list-column">
       <div class="search-container">
         <div class="search-input-wrapper">
           <span class="search-icon">🔍</span>
@@ -614,7 +549,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
         {{ t('search.results', { count: totalCount.toLocaleString() }) }}
       </div>
       
-      <div class="video-list">
+      <div class="video-list" ref="listContainerRef">
         <div
           v-for="(video, idx) in results"
           :key="video.id"
@@ -674,28 +609,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
         </div>
       </div>
     </div>
-    
-    <div 
-      class="resize-divider" 
-      @mousedown="startDrag"
-      :class="{ dragging: isDragging }"
-    ></div>
-    
-    
-    <PlayerColumn
-      :current-video="currentVideo"
-      :current-video-index="currentVideoIndex"
-      :results-count="results.length"
-      :has-next="hasNext"
-      :pip-active="pipActive"
-      :show-auto-skip="true"
-      @play-next="playNext"
-      @play-previous="playPrevious"
-      @open-pip="openPip"
-      @close-pip="closePip"
-      @video-watched="handleVideoWatched"
-    />
-    
+
     <!-- Advanced Filter Modal -->
     <div v-if="showAdvancedFilter" class="modal-backdrop" 
          @mousedown="handleModalMouseDown"
@@ -843,28 +757,17 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   background: var(--color-bg-primary);
-}
-
-@media (min-width: 600px) {
-  .search-view {
-    flex-direction: row;
-  }
-  
-  .list-column {
-    border-right: none;
-  }
-  
-  .player-column {
-    flex: 1;
-    border-bottom: none;
-  }
 }
 
 .list-column {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   background: var(--color-bg-primary);
+  overflow: hidden;
 }
 
 .search-container {

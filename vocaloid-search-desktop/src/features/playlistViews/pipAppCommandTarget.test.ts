@@ -15,4 +15,14 @@ describe('PipApp command target handling', () => {
     expect(source).toContain('iframeWindow: iframeRef.value?.contentWindow ?? null,')
     expect(source).toContain('lastPlayerMessageSource = rememberPlayerMessageSource(event.source)')
   })
+
+  test('guards PiP playback updates with playlist version-aware playlist state checks', () => {
+    const pipAppPath = resolve(__dirname, '../../PipApp.vue')
+    const source = readFileSync(pipAppPath, 'utf8')
+
+    expect(source).toContain('const latestPlaylistState = await api.getPlaylistState()')
+    expect(source).toContain('payload.playlist_type !== latestPlaylistState.playlist_type')
+    expect(source).toContain('payload.playlist_version !== latestPlaylistState.playlist_version')
+    expect(source).toContain('await handleVideoChange(payload.video, payload.index, payload.has_next)')
+  })
 })

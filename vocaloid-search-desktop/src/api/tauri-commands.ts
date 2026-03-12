@@ -120,6 +120,7 @@ export interface HistoryState {
   total_count: number
   sort_direction: string
   search_query: string
+  version: number
 }
 
 export interface WatchLaterState {
@@ -129,6 +130,7 @@ export interface WatchLaterState {
   total_count: number
   sort_direction: string
   search_query: string
+  version: number
 }
 
 
@@ -172,9 +174,10 @@ export interface FreshnessCheck {
 export interface PlaylistState {
   playlist_type: PlaylistType
   results: Video[]
-  index: number
+  index: number | null
   has_next: boolean
   pip_active: boolean
+  playlist_version: number
 }
 
 export interface PlaybackSettings {
@@ -193,6 +196,8 @@ export interface SearchState {
   page_size: number
   has_next: boolean
   total_count: number
+  version: number
+  results?: Video[]
 }
 
 export interface VideoSelectedPayload {
@@ -200,6 +205,7 @@ export interface VideoSelectedPayload {
   index: number
   has_next: boolean
   playlist_type: PlaylistType
+  playlist_version: number
 }
 
 export interface PipWindowState {
@@ -306,8 +312,8 @@ export const api = {
     return invoke('set_search_state', { searchState })
   },
 
-  loadMore: async (): Promise<SearchResponse> => {
-    return invoke('load_more')
+  loadMore: async (requestedPlaylistType?: PlaylistType, expectedVersion?: number): Promise<SearchResponse> => {
+    return invoke('load_more', { requestedPlaylistType, expectedVersion })
   },
 
   savePipWindowState: async (state: PipWindowState): Promise<void> => {
