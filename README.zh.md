@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.1 - 列表變更時播放重置
+
+**主要變更:**
+- 修復播放器重置問題：變更搜尋條件、排序或切換列表時，播放器現在會正確重置為空白狀態，而不是嘗試重新載入新結果中相同索引位置的影片
+- 新增事件通知機制：後端現在會在播放狀態失效時發送 `active-playback-cleared` 事件，確保前端與 Rust 狀態保持同步
+- 正確清理：`getPlaylistState()` 在沒有播放狀態時返回空值，防止使用過時的索引
+
+**技術改進:**
+- 在 `search()`、`get_history()`、`get_watch_later()` 函數中加入 `AppHandle` 參數以發送事件
+- 在 `App.vue` 中加入 `active-playback-cleared` 事件監聽器，觸發 `refreshActivePlayback()`
+- 修正 `getPlaylistState()` 的 fallback 行為，返回空結果而非舊索引
+
 ### v1.5.0 - 播放列表狀態同步修復
 
 **主要變更:**

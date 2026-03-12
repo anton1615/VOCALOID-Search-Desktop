@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.1 - リスト変更時の再生リセット
+
+**主な変更点:**
+- プレイヤーリセット問題を修正：検索条件、ソート、またはリストの切り替え時に、プレイヤーが新しい結果の同じインデックス位置の動画を再読み込みしようとするのではなく、正しく空の状態にリセットされるようになりました
+- イベント通知機能を追加：バックエンドは再生状態が無効になったときに `active-playback-cleared` イベントを発行し、フロントエンドが Rust 状態と同期し続けることを保証します
+- 適切なクリーンアップ：`getPlaylistState()` は再生状態がない場合に空の状態を返し、古いインデックスへのフォールバックを防止します
+
+**技術的改善:**
+- `search()`、`get_history()`、`get_watch_later()` 関数にイベント発行用の `AppHandle` パラメータを追加
+- `App.vue` に `active-playback-cleared` イベントリスナーを追加し、`refreshActivePlayback()` を呼び出すように変更
+- `getPlaylistState()` のフォールバック動作を修正し、旧インデックスではなく空の結果を返すように変更
+
 ### v1.5.0 - プレイリスト状態同期の修正
 
 **主な変更点:**

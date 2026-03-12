@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.1 - Playback Reset on List Mutation
+
+**Highlights:**
+- Fixed player reset issue: When changing search filters, sorting, or switching list contexts, the player now properly resets to an empty state instead of attempting to reload a video at the same index from the new results
+- Added event-based notification: Backend now emits `active-playback-cleared` event when active playback is invalidated, ensuring frontend stays in sync with Rust state
+- Proper cleanup: `getPlaylistState()` now returns empty state when no active playback exists, preventing stale index fallback
+
+**Technical Improvements:**
+- Added `AppHandle` parameter to `search()`, `get_history()`, and `get_watch_later()` functions for event emission
+- Added listener for `active-playback-cleared` event in `App.vue` that calls `refreshActivePlayback()`
+- Fixed `getPlaylistState()` fallback behavior to return empty results instead of legacy index
+
 ### v1.5.0 - Playlist State Synchronization Fix
 
 **Highlights:**
