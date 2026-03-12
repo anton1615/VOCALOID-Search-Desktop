@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
@@ -8,7 +8,7 @@ import UploaderAvatar from '../components/UploaderAvatar.vue'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
 import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
-import { shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
+import { scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
 import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
@@ -366,6 +366,11 @@ onMounted(async () => {
     // Fallback to initial search on error
     await search()
   }
+
+  // Scroll to the currently playing video after state restoration
+  await nextTick()
+  const listContainer = listContainerRef.value
+  scrollVideoIntoView(currentVideoIndex.value, listContainer)
 
   unlistenPip = await listen('pip-closed', () => {
     console.log('[SearchView] Received pip-closed event')

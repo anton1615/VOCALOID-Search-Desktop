@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.2 - 切換頁面時自動滾動至播放中的影片
+
+**主要變更:**
+- 新增自動滾動行為：當切換回播放列表頁面（搜尋、歷史紀錄或稍後觀看）且有影片正在播放時，列表現在會自動滾動至播放中的影片位置
+- 抽取共用滾動函數：在 `playlistViewState.ts` 中建立 `scrollVideoIntoView()` 工具函數，減少三個 View 之間的程式碼重複
+- 一致的滾動行為：自動滾動使用與現有播放時滾動相同的邏輯，確保上一首影片在上方可見、下下首影片在下方可見（如果存在）
+
+**技術改進:**
+- 新增 `scrollVideoIntoView(index, listContainer)` 函數，包含 null 安全檢查
+- 在 `onMounted` 狀態還原後使用 `nextTick()` 整合滾動調用，確保正確的 DOM 時機
+- 為新的滾動函數新增單元測試，涵蓋邊界情況（null 容器、缺少元素等）
+
 ### v1.5.1 - 列表變更時播放重置
 
 **主要變更:**

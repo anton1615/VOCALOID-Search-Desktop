@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
 import { formatDateTime } from '../utils/dateTime'
 import { mapHistoryEntryToVideo } from '../utils/playlistPlaceholders'
-import { createHydratedCurrentVideo, getInitialPlaylistViewState, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
+import { createHydratedCurrentVideo, getInitialPlaylistViewState, scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
 import { createPagedPlaylistController } from '../features/playlistViews/pagedPlaylistController'
 
 const { t } = useI18n()
@@ -201,6 +201,11 @@ onMounted(async () => {
     if (initialViewState.selectedVideo && initialViewState.selectedIndex >= 0) {
       await hydrateCurrentVideo(initialViewState.selectedVideo, initialViewState.selectedIndex)
     }
+
+    // Scroll to the currently playing video after state restoration
+    await nextTick()
+    const listContainer = document.querySelector('.video-list')
+    scrollVideoIntoView(initialViewState.selectedIndex, listContainer as HTMLElement | null)
   } catch (e) {
     console.error('[HistoryView] Failed to restore state:', e)
     await loadHistory()

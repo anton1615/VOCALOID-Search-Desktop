@@ -247,6 +247,18 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.2 - Auto-Scroll to Playing Video on Page Switch
+
+**Highlights:**
+- Added automatic scroll behavior: When switching back to a playlist view (Search, History, or Watch Later) while a video is playing, the list now automatically scrolls to bring the playing video into view
+- Extracted shared scroll function: Created `scrollVideoIntoView()` utility in `playlistViewState.ts` to reduce code duplication across the three views
+- Consistent scroll behavior: The auto-scroll uses the same logic as the existing scroll-on-play behavior, ensuring the previous video is visible above and the next-next video is visible below when possible
+
+**Technical Improvements:**
+- Added `scrollVideoIntoView(index, listContainer)` function with null-safety checks
+- Integrated scroll call in `onMounted` after state restoration using `nextTick()` for proper DOM timing
+- Added unit tests for the new scroll function covering edge cases (null container, missing elements, etc.)
+
 ### v1.5.1 - Playback Reset on List Mutation
 
 **Highlights:**
