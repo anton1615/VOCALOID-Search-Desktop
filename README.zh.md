@@ -247,6 +247,20 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.0 - 播放列表狀態同步修復
+
+**主要變更:**
+- 修復「斷層」問題：在搜尋、歷史紀錄、稍後觀看之間切換後，載入更多結果時第 51 筆影片出現排序異常的問題已解決
+- 播放狀態獨立：播放中的影片不會因為切換頁面而中斷，直到您從其他列表選擇新影片
+- 版本控制機制：新增列表上下文版本控制，防止並行載入請求造成資料混亂
+- 向後兼容：保留舊版欄位以確保平滑升級
+
+**技術改進:**
+- 重構 Rust 狀態管理，採用 `ListContext` 和 `ActivePlayback` 模型
+- 前端還原邏輯現在從 `list_context` 讀取狀態，確保資料一致性
+- 新增版本預留機制，使並行的 `load_more` 請求失效
+- 正確同步 `search_state.results` 和 `search_results`
+
 ### v1.4.1 - 共用頭像 fallback
 
 **主要變更:**

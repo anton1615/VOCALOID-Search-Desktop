@@ -247,6 +247,20 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.0 - Playlist State Synchronization Fix
+
+**Highlights:**
+- Fixed "gap" issue where video ordering broke at the 51st position when loading more results after switching between Search, History, and Watch Later views
+- Playback now persists across view switches until you explicitly select a video from another list
+- Added list context versioning to prevent data corruption from concurrent load requests
+- Backward compatible with legacy state fields for smooth upgrades
+
+**Technical Improvements:**
+- Refactored Rust state management with `ListContext` and `ActivePlayback` models
+- Frontend restore logic now reads from `list_context` for data consistency
+- Added version reservation mechanism to invalidate concurrent `load_more` requests
+- Synced `search_state.results` and `search_results` properly on load_more
+
 ### v1.4.1 - Shared Avatar Fallback
 
 **Highlights:**

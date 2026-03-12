@@ -46,3 +46,7 @@ nul
 
 # Git worktrees
 .worktrees/
+
+
+# Gemini AI
+.gemini/
