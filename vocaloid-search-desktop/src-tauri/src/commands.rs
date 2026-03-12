@@ -52,19 +52,16 @@ pub async fn get_playlist_state(
         }
     }
     
-    // Fallback to legacy behavior (for migration compatibility)
+    // No active playback - return empty state
     let playlist_type = *state.playlist_type.read();
-    let results = playlist_results_for_type(&state, playlist_type);
-    let index = *state.playlist_index.read();
-    let has_next = index.map(|i| i + 1 < results.len()).unwrap_or(false);
     let pip_active = *state.pip_active.read();
     let playlist_version = playlist_version_for_type(&state, playlist_type);
 
     Ok(PlaylistState {
         playlist_type,
-        results,
-        index,
-        has_next,
+        results: vec![],
+        index: None,
+        has_next: false,
         pip_active,
         playlist_version,
     })
@@ -469,6 +466,7 @@ fn parse_tags(tags: Option<&str>) -> Vec<String> {
 
 #[tauri::command]
 pub async fn search(
+    app: AppHandle,
     request: SearchRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<SearchResponse, String> {
@@ -698,6 +696,7 @@ pub async fn search(
         
         // Clear active playback for Search when query changes
         state.clear_active_playback_for_list(&ListContextId::Search);
+        app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
         println!("[search] Updated search_state: sort={:?}, page=1, version={}", ss.sort, ss.version);
     } else {
         // Update pagination state for subsequent pages
@@ -976,6 +975,7 @@ pub async fn get_watched(
 
 #[tauri::command]
 pub async fn get_history(
+    app: AppHandle,
     page: usize,
     page_size: usize,
     sort_direction: Option<String>,
@@ -1024,6 +1024,7 @@ pub async fn get_history(
             // Clear active playback if History was playing
             drop(contexts);
             state.clear_active_playback_for_list(&ListContextId::History);
+            app.emit("active-playback-cleared", "History").map_err(|e| e.to_string())?;
             contexts = state.list_contexts.write();
         }
         
@@ -1620,6 +1621,7 @@ pub async fn is_in_watch_later(
 
 #[tauri::command]
 pub async fn get_watch_later(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
     page: usize,
     page_size: usize,
@@ -1667,6 +1669,7 @@ pub async fn get_watch_later(
             // Clear active playback if WatchLater was playing
             drop(contexts);
             state.clear_active_playback_for_list(&ListContextId::WatchLater);
+            app.emit("active-playback-cleared", "WatchLater").map_err(|e| e.to_string())?;
             contexts = state.list_contexts.write();
         }
         

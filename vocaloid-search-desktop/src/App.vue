@@ -124,6 +124,7 @@ function stopDrag() {
 
 let unlistenVideoSelected: (() => void) | null = null
 let unlistenPipClosed: (() => void) | null = null
+let unlistenActivePlaybackCleared: (() => void) | null = null
 
 onMounted(async () => {
   try {
@@ -146,6 +147,10 @@ onMounted(async () => {
       pipActive.value = false
     })
 
+    unlistenActivePlaybackCleared = await listen('active-playback-cleared', async () => {
+      await refreshActivePlayback()
+    })
+
     if (!freshness.is_fresh) {
       shouldRedirectToScraper.value = true
       router.push('/scraper')
@@ -160,6 +165,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPipClosed) unlistenPipClosed()
+  if (unlistenActivePlaybackCleared) unlistenActivePlaybackCleared()
   stopDrag()
 })
 </script>

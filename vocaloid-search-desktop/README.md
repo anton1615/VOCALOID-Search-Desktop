@@ -4,6 +4,15 @@ A desktop application for searching VOCALOID videos from Niconico.
 
 ## Release Notes
 
+
+### v1.5.1 (2025-03-12)
+
+#### Playback Reset on List Mutation
+
+- **Fixed player reset issue**: When changing search filters, sorting, or switching list contexts, the player now properly resets to an empty state instead of attempting to reload a video at the same index from the new results
+- **Event-based notification**: Backend now emits `active-playback-cleared` event when active playback is invalidated, ensuring frontend stays in sync with Rust state
+- **Proper cleanup**: `getPlaylistState()` now returns empty state when no active playback exists, preventing stale index fallback
+
 ### v1.5.0 (2025-03-12)
 
 #### Playlist State Synchronization Fix
