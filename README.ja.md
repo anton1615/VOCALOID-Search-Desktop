@@ -247,6 +247,21 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.3 - プレイヤー情報パネルのURLコピーボックス
+
+**主な変更点:**
+- 埋め込みプレイヤーの下にURL表示ボックスを追加し、完全な動画URLを表示
+- コピーボタン（📋）を追加し、ワンクリックでURLをクリップボードにコピー
+- コピー成功後、ボタンに「已複製 ✓」フィードバックを表示し、1.5秒後に自動復元
+- URLボックスは VideoMetaPanel コンポーネントを通じてメインウィンドウとPiPウィンドウで共有
+- URLが長い場合は省略記号で切り捨て表示されますが、コピー時は完全なURL
+
+**技術的実装:**
+- VideoMetaPanel.vue に `copied` ref 状態と `copyToClipboard()` 非同期関数を追加
+- クリップボードアクセスに `navigator.clipboard.writeText()` を使用
+- 既存のデザインに合わせた `.url-section`、`.url-text`、`.copy-btn` CSSスタイルを追加
+- 条件付きレンダリング：`video.watch_url` が存在する場合のみ表示
+
 ### v1.5.2 - ページ切り替え時の再生中動画への自動スクロール
 
 **主な変更点:**
@@ -259,7 +274,6 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - `onMounted` での状態復元後、`nextTick()` を使用してスクロール呼び出しを統合し、適切なDOMタイミングを確保
 - 新しいスクロール関数の単体テストを追加し、エッジケース（nullコンテナ、要素欠落など）をカバー
 
-### v1.5.1 - リスト変更時の再生リセット
 
 **主な変更点:**
 - プレイヤーリセット問題を修正：検索条件、ソート、またはリストの切り替え時に、プレイヤーが新しい結果の同じインデックス位置の動画を再読み込みしようとするのではなく、正しく空の状態にリセットされるようになりました

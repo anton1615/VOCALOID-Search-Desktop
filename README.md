@@ -247,6 +247,21 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.3 - URL Copy Box in Player Metadata Panel
+
+**Highlights:**
+- Added a URL display box below the embedded player showing the full video URL
+- Added a copy button (📋) that copies the URL to clipboard with one click
+- Button shows "已複製 ✓" feedback for 1.5 seconds after successful copy
+- URL box is shared between main window and PiP window via VideoMetaPanel component
+- URL text truncates with ellipsis when too long, but full URL is still copied
+
+**Technical Implementation:**
+- Added `copied` ref state and `copyToClipboard()` async function in VideoMetaPanel.vue
+- Used `navigator.clipboard.writeText()` for clipboard access
+- Added `.url-section`, `.url-text`, `.copy-btn` CSS styles matching existing design
+- Conditional rendering: only shows when `video.watch_url` exists
+
 ### v1.5.2 - Auto-Scroll to Playing Video on Page Switch
 
 **Highlights:**
@@ -258,6 +273,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - Added `scrollVideoIntoView(index, listContainer)` function with null-safety checks
 - Integrated scroll call in `onMounted` after state restoration using `nextTick()` for proper DOM timing
 - Added unit tests for the new scroll function covering edge cases (null container, missing elements, etc.)
+
 
 ### v1.5.1 - Playback Reset on List Mutation
 

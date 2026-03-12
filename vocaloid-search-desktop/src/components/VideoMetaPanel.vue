@@ -28,12 +28,28 @@ const props = withDefaults(defineProps<{
 })
 
 const descriptionExpanded = ref(false)
+const copied = ref(false)
 
 const visibleTags = computed(() => props.video.tags?.slice(0, 12) ?? [])
 const remainingTagCount = computed(() => Math.max((props.video.tags?.length ?? 0) - visibleTags.value.length, 0))
 const hasUploader = computed(() => Boolean(props.video.uploader_id || props.video.uploader_name || props.uploaderName))
 const layout = computed(() => getVideoMetaPanelLayout(props.displayMode))
 const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.description ?? ''))
+
+async function copyToClipboard() {
+  if (!props.video.watch_url || copied.value) return
+  
+  try {
+    await navigator.clipboard.writeText(props.video.watch_url)
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 1500)
+  } catch (err) {
+    console.error('Failed to copy URL:', err)
+  }
+}
+
 </script>
 
 <template>
@@ -63,6 +79,13 @@ const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.
     </div>
 
     <div v-if="layout.showDetails" class="info-below-player">
+      <div v-if="video.watch_url" class="url-section">
+        <span class="url-text">{{ video.watch_url }}</span>
+        <button class="copy-btn" @click="copyToClipboard">
+          {{ copied ? '已複製 ✓' : '📋' }}
+        </button>
+      </div>
+
       <div v-if="visibleTags.length" class="tags-section">
         <span v-for="tag in visibleTags" :key="tag" class="tag">{{ tag }}</span>
         <span v-if="remainingTagCount > 0" class="tag more">+{{ remainingTagCount }}</span>
@@ -194,6 +217,44 @@ const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.
 
 .tag.more {
   opacity: 0.8;
+}
+
+.url-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-hover);
+  border-radius: 6px;
+}
+
+.url-text {
+  flex: 1;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover {
+  background: var(--color-accent-primary);
+  color: var(--color-bg-primary);
+  border-color: var(--color-accent-primary);
 }
 
 .description-section {

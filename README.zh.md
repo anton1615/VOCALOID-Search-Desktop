@@ -247,6 +247,21 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.3 - 播放器資訊面板 URL 複製框
+
+**主要變更:**
+- 在嵌入式播放器下方新增 URL 顯示框，顯示完整影片網址
+- 新增複製按鈕（📋），一鍵複製網址至剪貼簿
+- 複製成功後按鈕顯示「已複製 ✓」回饋，1.5 秒後自動恢復
+- URL 框在主視窗與 PiP 視窗共用，透過 VideoMetaPanel 元件實現
+- 網址過長時以省略號截斷顯示，但複製時仍為完整網址
+
+**技術實作:**
+- 在 VideoMetaPanel.vue 新增 `copied` ref 狀態與 `copyToClipboard()` 非同步函數
+- 使用 `navigator.clipboard.writeText()` 存取剪貼簿
+- 新增 `.url-section`、`.url-text`、`.copy-btn` CSS 樣式，符合現有設計風格
+- 條件渲染：僅在 `video.watch_url` 存在時顯示
+
 ### v1.5.2 - 切換頁面時自動滾動至播放中的影片
 
 **主要變更:**
@@ -259,7 +274,6 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - 在 `onMounted` 狀態還原後使用 `nextTick()` 整合滾動調用，確保正確的 DOM 時機
 - 為新的滾動函數新增單元測試，涵蓋邊界情況（null 容器、缺少元素等）
 
-### v1.5.1 - 列表變更時播放重置
 
 **主要變更:**
 - 修復播放器重置問題：變更搜尋條件、排序或切換列表時，播放器現在會正確重置為空白狀態，而不是嘗試重新載入新結果中相同索引位置的影片
