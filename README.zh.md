@@ -247,6 +247,16 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+
+### v1.5.4 - 修復載入更多時的競態條件
+
+**主要變更:**
+- 修復了一個嚴重的競態條件：當 PiP 視窗啟用時快速切換排序方向或篩選條件，會導致搜尋結果在第 51 筆影片處出現資料混亂
+- 問題發生在 `load_more` 於 `reserve_version` 與 `finalize` 之間被觸發，讀取到過時的排序參數
+
+**技術修復:**
+- 修改 `reserve_list_context_version()` 函數，在遞增版本號時同步更新所有瀏覽參數（query, sort, filters, exclude_watched, formula_filter）
+- 確保 `load_more` 永遠讀取到一致的狀態，消除競態條件的時間窗口
 ### v1.5.3 - 播放器資訊面板 URL 複製框
 
 **主要變更:**

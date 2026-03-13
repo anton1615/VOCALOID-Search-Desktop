@@ -265,15 +265,29 @@ impl AppState {
     }
 
     /// Reserve a new version for a list context at the start of a search
-    /// This invalidates any in-flight load_more requests
+    /// This invalidates any in-flight load_more requests and atomically updates browsing params
     /// Returns the new reserved version
-    pub fn reserve_list_context_version(&self, list_id: &ListContextId) -> u64 {
+    pub fn reserve_list_context_version(
+        &self,
+        list_id: &ListContextId,
+        query: String,
+        sort: Option<crate::models::SortConfig>,
+        filters: Option<crate::models::Filters>,
+        exclude_watched: bool,
+        formula_filter: Option<crate::models::FormulaFilter>,
+    ) -> u64 {
         let mut contexts = self.list_contexts.write();
         let context = contexts.entry(list_id.clone()).or_default();
         context.version += 1;
         context.items.clear();
         context.page = 1;
         context.has_next = false;
+        // Atomically update browsing params to prevent race with load_more
+        context.query = query;
+        context.sort = sort;
+        context.filters = filters;
+        context.exclude_watched = exclude_watched;
+        context.formula_filter = formula_filter;
         context.version
     }
 

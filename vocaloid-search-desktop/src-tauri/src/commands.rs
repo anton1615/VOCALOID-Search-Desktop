@@ -474,7 +474,14 @@ pub async fn search(
     
     // For new searches (page 1), reserve version upfront to invalidate in-flight load_more
     let reserved_version = if request.page == 1 {
-        let v = state.reserve_list_context_version(&ListContextId::Search);
+        let v = state.reserve_list_context_version(
+            &ListContextId::Search,
+            request.query.clone(),
+            request.sort.clone(),
+            request.filters.clone(),
+            request.exclude_watched,
+            request.formula_filter.clone(),
+        );
         println!("[search] Reserved version {} for new search", v);
         Some(v)
     } else {

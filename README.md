@@ -247,6 +247,16 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+
+### v1.5.4 - Fix Load More Race Condition
+
+**Highlights:**
+- Fixed a critical race condition where toggling sort direction or filters while PiP is active caused search results to become corrupted at the 51st video boundary
+- The issue occurred when `load_more` was triggered between `reserve_version` and `finalize` during a new search, causing it to read stale sorting parameters
+
+**Technical Fix:**
+- Modified `reserve_list_context_version()` to atomically update all browsing parameters (query, sort, filters, exclude_watched, formula_filter) when incrementing the version
+- This ensures `load_more` always sees consistent state, eliminating the race condition window
 ### v1.5.3 - URL Copy Box in Player Metadata Panel
 
 **Highlights:**

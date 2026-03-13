@@ -247,6 +247,16 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+
+### v1.5.4 - さらに読み込み時の競合状態を修正
+
+**主な変更点:**
+- PiPウィンドウがアクティブな状態でソート順序やフィルタを素早く切り替えると、検索結果の51番目の動画でデータが乱れる重大な競合状態を修正
+- 問題は `load_more` が `reserve_version` と `finalize` の間でトリガーされ、古いソートパラメータを読み取ってしまうことでした
+
+**技術的修正:**
+- `reserve_list_context_version()` 関数を変更し、バージョン番号をインクリメントする際にすべての閲覧パラメータ（query, sort, filters, exclude_watched, formula_filter）を原子的に更新
+- `load_more` が常に一貫した状態を読み取ることを保証し、競合状態の時間枠を排除
 ### v1.5.3 - プレイヤー情報パネルのURLコピーボックス
 
 **主な変更点:**
