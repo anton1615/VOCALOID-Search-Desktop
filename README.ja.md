@@ -247,8 +247,26 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.5 - 統一プレイヤーアーキテクチャリファクタリング
 
-### v1.5.4 - さらに読み込み時の競合状態を修正
+**主な変更点:**
+- プレイヤーアーキテクチャをリファクタリングし、メインウィンドウとPiPウィンドウ間のコード重複を解消
+- 重要なバグを修正：検索条件変更時にPiPウィンドウが正しくリセットされるようになりました（`active-playback-cleared`イベントが両方のウィンドウで処理されるようになりました）
+- 共有プレイヤーロジック用の統一composables（`usePlayerCore`、`usePlayerEvents`、`usePlayerSettings`、`usePlayerInfo`）を作成
+- フルモード（メインウィンドウ）とコンパクトモード（PiPウィンドウ）をサポートする`UnifiedPlayer.vue`コンポーネントを作成
+- プレイヤーコントロールのUIレイアウトを改善し、視覚的なバランスと対称性を向上
+- メインウィンドウのプレイヤーカラムで説明展開時のスクロールをサポート
+- PiPウィンドウのサイドバーコントロールが正しく垂直中央揃えされるように修正
+
+**技術的実装:**
+- プレイヤー状態管理を`usePlayerCore.ts` composableに抽出
+- イベント処理を`usePlayerEvents.ts`に抽出し、`active-playback-cleared`イベントをサポート
+- 再生設定を`usePlayerSettings.ts`に抽出
+- ユーザー情報キャッシュを`usePlayerInfo.ts`に抽出
+- 水平/垂直レイアウトをサポートする`PlayerControls.vue`を作成
+- `PlayerColumn.vue`と`PipApp.vue`を簡素化し、統一コンポーネントを使用
+- PiPエントリポイントでのi18n初期化を修正
+
 
 **主な変更点:**
 - PiPウィンドウがアクティブな状態でソート順序やフィルタを素早く切り替えると、検索結果の51番目の動画でデータが乱れる重大な競合状態を修正

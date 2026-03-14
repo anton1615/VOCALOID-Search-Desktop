@@ -83,14 +83,12 @@ watch(() => props.videoId, () => {
 <style scoped>
 .watch-later-btn {
   font-size: 1.2em;
-  padding: 0.25rem 0.5rem;
 }
 
 .watch-later-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
 .heart-icon {
   width: 20px;
   height: 20px;

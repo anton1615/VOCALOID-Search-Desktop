@@ -247,6 +247,25 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.5 - 統一播放器架構重構
+
+**主要變更:**
+- 重構播放器架構，消除主視窗與 PIP 視窗之間的程式碼重複
+- 修復關鍵 bug：變更搜尋條件時 PIP 視窗現在會正確重置（`active-playback-cleared` 事件現在在兩個視窗都會被處理）
+- 建立統一的 composables（`usePlayerCore`、`usePlayerEvents`、`usePlayerSettings`、`usePlayerInfo`）處理共享的播放器邏輯
+- 建立 `UnifiedPlayer.vue` 元件，支援完整模式（主視窗）和精簡模式（PIP 視窗）
+- 改善播放控制元件的 UI 佈局，視覺上更平衡對稱
+- 主視窗播放器欄位現在支援在描述展開時滾動
+- PIP 視窗側邊欄控制元件現在正確垂直置中
+
+**技術實作:**
+- 將播放器狀態管理抽取到 `usePlayerCore.ts` composable
+- 將事件處理抽取到 `usePlayerEvents.ts`，支援 `active-playback-cleared` 事件
+- 將播放設定抽取到 `usePlayerSettings.ts`
+- 將使用者資訊快取抽取到 `usePlayerInfo.ts`
+- 建立 `PlayerControls.vue`，支援水平/垂直佈局
+- 簡化 `PlayerColumn.vue` 和 `PipApp.vue`，使用統一元件
+- 修復 PIP 入口點的 i18n 初始化
 
 ### v1.5.4 - 修復載入更多時的競態條件
 

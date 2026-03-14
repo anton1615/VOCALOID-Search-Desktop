@@ -50,3 +50,6 @@ nul
 
 # Gemini AI
 .gemini/
+.memory/
+
+.memory/branches/*/log.md

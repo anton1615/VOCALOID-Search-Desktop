@@ -1,49 +1,36 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { api, type Video, type VideoSelectedPayload, type PlaybackSettings, type UserInfo, getUploaderAvatarUrl } from './api/tauri-commands'
-import WatchLaterButton from './components/WatchLaterButton.vue'
-import VideoMetaPanel from './components/VideoMetaPanel.vue'
-import { formatDateTime } from './utils/dateTime'
-import { createEmbeddedPlayerController } from './features/playlistViews/embeddedPlayerController'
-import { getPipLayout } from './features/playlistViews/pipLayout'
-import { resolvePlayerCommandTarget } from './features/playlistViews/playerCommandTarget'
-import { rememberPlayerMessageSource, type PostMessageTarget } from './features/playlistViews/playerMessageSource'
-import { canPreloadSearchResults } from './features/playlistViews/searchViewInteractions'
+import { api, type Video, type VideoSelectedPayload, type PlaybackSettings } from './api/tauri-commands'
+import UnifiedPlayer from './components/UnifiedPlayer.vue'
+
+// Current video state
 const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
+const resultsCount = ref(0)
 const hasNext = ref(false)
-const iframeRef = ref<HTMLIFrameElement | null>(null)
-let lastPlayerMessageSource: PostMessageTarget | null = null
-const autoPlay = ref(true)
-const autoSkip = ref(false)
-const skipThreshold = ref(30)
 
-const playerController = createEmbeddedPlayerController({
-  sendCommand: (command) => sendCommand(command),
-  onPlayNext: () => {
-    void playNext()
-  },
-  onMarkWatched: (video) => {
-    void api.markWatched(video.id, video.title, video.thumbnail_url)
-    if (currentVideo.value?.id === video.id) {
-      currentVideo.value.is_watched = true
-    }
-  },
-  schedule: (callback) => setTimeout(callback, 500),
-})
+// Reference to the unified player
+const unifiedPlayerRef = ref<InstanceType<typeof UnifiedPlayer> | null>(null)
 
-const isPlaying = ref(playerController.state.isPlaying)
-const playerReady = ref(playerController.state.playerReady)
-
-const userInfoCache = reactive(new Map<string, UserInfo>())
-const currentUserInfo = ref<UserInfo | null>(null)
-const pipLayout = getPipLayout()
-
+// PIP window management
 const pipWindow = getCurrentWindow()
 let isClosing = false
 
+// Event listeners
+let unlistenVideoSelected: (() => void) | null = null
+let unlistenPlaybackSettings: (() => void) | null = null
+let unlistenVideoWatched: (() => void) | null = null
+let unlistenSearchResultsUpdated: (() => void) | null = null
+let unlistenActivePlaybackCleared: (() => void) | null = null
+let unlistenResize: (() => void) | null = null
+let unlistenMove: (() => void) | null = null
+let unlistenClose: (() => void) | null = null
+
+/**
+ * Save PIP window state
+ */
 async function saveWindowState() {
   try {
     const position = await pipWindow.outerPosition()
@@ -55,224 +42,198 @@ async function saveWindowState() {
       height: size.height
     })
   } catch (e) {
-    console.error('Failed to save pip window state:', e)
+    console.error('[PiP] Failed to save window state:', e)
   }
 }
 
-function getCachedUserNickname(video: Video | null): string {
-  if (!video) return ''
-  if (video.id === currentVideo.value?.id && currentUserInfo.value?.user_nickname) {
-    return currentUserInfo.value.user_nickname
-  }
-  const cached = userInfoCache.get(video.id)
-  if (cached?.user_nickname) return cached.user_nickname
-  return video.uploader_name || video.uploader_id || ''
-}
-
-function getCachedUserIconUrl(video: Video | null): string | null {
-  if (!video) return null
-  if (video.id === currentVideo.value?.id && currentUserInfo.value?.user_icon_url) {
-    return currentUserInfo.value.user_icon_url
-  }
-  const cached = userInfoCache.get(video.id)
-  if (cached?.user_icon_url) return cached.user_icon_url
-  return getUploaderAvatarUrl(video.uploader_id)
-}
-
-function loadPlayer(videoId: string) {
-  console.log('[PiP] loadPlayer called with:', videoId, 'iframeRef:', !!iframeRef.value)
-  if (iframeRef.value) {
-    playerReady.value = false
-    iframeRef.value.src = `https://embed.nicovideo.jp/watch/${videoId}?jsapi=1&playerId=1`
-    console.log('[PiP] iframe src set')
-  } else {
-    console.error('[PiP] iframeRef is null!')
+/**
+ * Handle video change from video-selected event
+ */
+async function handleVideoChange(video: Video, index: number, hasNextVideo: boolean) {
+  console.log('[PiP] handleVideoChange called:', video.id, 'index:', index)
+  currentVideo.value = video
+  currentIndex.value = index
+  hasNext.value = hasNextVideo
+  try {
+    const state = await api.getPlaylistState()
+    resultsCount.value = state.results.length
+  } catch (e) {
+    console.error('[PiP] Failed to get playlist state:', e)
   }
 }
 
-function sendCommand(command: string) {
-  const target = resolvePlayerCommandTarget({
-    lastMessageSource: lastPlayerMessageSource,
-    iframeWindow: iframeRef.value?.contentWindow ?? null,
-  })
-
-  target?.postMessage(
-    {
-      eventName: command,
-      playerId: '1',
-      sourceConnectorType: 1,
-    },
-    'https://embed.nicovideo.jp'
-  )
-}
-
-function togglePlayPause() {
-  if (!playerReady.value) return
-  sendCommand(isPlaying.value ? 'pause' : 'play')
-}
-
+/**
+ * Play next video
+ */
 async function playNext() {
   if (currentIndex.value >= 0) {
     // Check if we need to preload more results
-    // Load more when within 5 videos of the end
-    const playlistState = await api.getPlaylistState()
-    const remaining = playlistState.results.length - currentIndex.value - 1
-    
-    const canPreload = canPreloadSearchResults(playlistState.playlist_type)
+    try {
+      const playlistState = await api.getPlaylistState()
+      const remaining = playlistState.results.length - currentIndex.value - 1
+      
+      const { canPreloadSearchResults } = await import('./features/playlistViews/searchViewInteractions')
+      const canPreload = canPreloadSearchResults(playlistState.playlist_type)
 
-    if (remaining <= 5 && hasNext.value && canPreload) {
-      // Close to end, try to preload more for Search playlists only
-      try {
-        const searchState = await api.getSearchState()
-        if (searchState.has_next) {
-          console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
-          await api.loadMore('Search', searchState.version)
-        }
-      } catch (e) {
-        console.error('[PiP] Preload failed:', e)
-      }
-    } else if (!hasNext.value && canPreload) {
-      // At the end, try to load more as last resort for Search playlists only
-      try {
-        const searchState = await api.getSearchState()
-        if (searchState.has_next) {
-          console.log('[PiP] At end, loading more...')
-          await api.loadMore('Search', searchState.version)
-          const newPlaylistState = await api.getPlaylistState()
-          if (newPlaylistState.index !== null && newPlaylistState.index + 1 < newPlaylistState.results.length) {
-            hasNext.value = true
+      if (remaining <= 5 && hasNext.value && canPreload) {
+        try {
+          const searchState = await api.getSearchState()
+          if (searchState.has_next) {
+            console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
+            await api.loadMore('Search', searchState.version)
           }
+        } catch (e) {
+          console.error('[PiP] Preload failed:', e)
         }
-      } catch (e) {
-        console.error('[PiP] loadMore failed:', e)
+      } else if (!hasNext.value && canPreload) {
+        try {
+          const searchState = await api.getSearchState()
+          if (searchState.has_next) {
+            console.log('[PiP] At end, loading more...')
+            await api.loadMore('Search', searchState.version)
+            const newPlaylistState = await api.getPlaylistState()
+            if (newPlaylistState.index !== null && newPlaylistState.index + 1 < newPlaylistState.results.length) {
+              hasNext.value = true
+            }
+          }
+        } catch (e) {
+          console.error('[PiP] loadMore failed:', e)
+        }
       }
-    }
-    
-    if (hasNext.value) {
-      await api.setPlaylistIndex(currentIndex.value + 1)
+      
+      if (hasNext.value) {
+        await api.setPlaylistIndex(currentIndex.value + 1)
+      }
+    } catch (e) {
+      console.error('[PiP] playNext failed:', e)
     }
   }
 }
 
+/**
+ * Play previous video
+ */
 async function playPrevious() {
   if (currentIndex.value > 0) {
     await api.setPlaylistIndex(currentIndex.value - 1)
   }
 }
 
-async function fetchUserInfo(video: Video) {
-  if (!userInfoCache.has(video.id)) {
-    try {
-      const userInfo = await api.getUserInfo(video.id)
-      if (userInfo) {
-        userInfoCache.set(video.id, userInfo)
-      }
-    } catch (e) {
-      console.error('Failed to fetch user info:', e)
-    }
+/**
+ * Handle video watched event
+ */
+function handleVideoWatched(video: Video) {
+  if (currentVideo.value?.id === video.id) {
+    currentVideo.value = video
   }
-  currentUserInfo.value = userInfoCache.get(video.id) || null
 }
 
-async function handleVideoChange(video: Video, index: number, hasNextVideo: boolean) {
-  console.log('[PiP] handleVideoChange called:', video.id, 'index:', index)
-  currentVideo.value = video
-  currentIndex.value = index
-  hasNext.value = hasNextVideo
-  currentUserInfo.value = null
-  playerController.setCurrentVideo(video)
-  playerReady.value = playerController.state.playerReady
-  isPlaying.value = playerController.state.isPlaying
-
-  await fetchUserInfo(video)
-  console.log('[PiP] Calling loadPlayer with:', video.id)
-  loadPlayer(video.id)
+/**
+ * Handle state cleared event (from active-playback-cleared)
+ */
+function handleStateCleared() {
+  console.log('[PiP] State cleared, resetting player')
+  currentVideo.value = null
+  currentIndex.value = -1
+  hasNext.value = false
+  resultsCount.value = 0
 }
 
-function handleMessage(event: MessageEvent) {
-  if (!event.data || event.origin !== 'https://embed.nicovideo.jp') return
-
-  lastPlayerMessageSource = rememberPlayerMessageSource(event.source)
-
-  const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-  playerController.setPlaybackSettings({
-    autoPlay: autoPlay.value,
-    autoSkip: autoSkip.value,
-    skipThreshold: skipThreshold.value,
-  })
-  playerController.handlePlayerEvent(data)
-  playerReady.value = playerController.state.playerReady
-  isPlaying.value = playerController.state.isPlaying
-}
-
-let unlistenVideoSelected: (() => void) | null = null
-let unlistenPlaybackSettings: (() => void) | null = null
-let unlistenVideoWatched: (() => void) | null = null
-let unlistenSearchResultsUpdated: (() => void) | null = null
-let unlistenResize: (() => void) | null = null
-let unlistenMove: (() => void) | null = null
-let unlistenClose: (() => void) | null = null
-
+// Lifecycle
 onMounted(async () => {
   console.log('[PiP] onMounted start')
-  window.addEventListener('message', handleMessage)
 
-  const state = await api.getPlaylistState()
-  console.log('[PiP] getPlaylistState result:', state.results.length, 'videos, index:', state.index)
-  if (state.results.length > 0 && state.index !== null && state.index >= 0 && state.index < state.results.length) {
-    await handleVideoChange(state.results[state.index], state.index, state.has_next)
+  // Get initial state
+  try {
+    const state = await api.getPlaylistState()
+    console.log('[PiP] getPlaylistState result:', state.results.length, 'videos, index:', state.index, 'version:', state.playlist_version)
+    
+    if (state.results.length > 0 && state.index !== null && state.index >= 0 && state.index < state.results.length) {
+      currentVideo.value = state.results[state.index]
+      currentIndex.value = state.index
+      hasNext.value = state.has_next
+      resultsCount.value = state.results.length
+      console.log('[PiP] Initial video set:', currentVideo.value?.id)
+    } else {
+      console.log('[PiP] No initial video to set')
+    }
+  } catch (e) {
+    console.error('[PiP] Failed to get initial playlist state:', e)
   }
 
-  const settings = await api.getPlaybackSettings()
-  autoPlay.value = settings.auto_play
-  autoSkip.value = settings.auto_skip
-  skipThreshold.value = settings.skip_threshold
-  playerController.setPlaybackSettings({
-    autoPlay: autoPlay.value,
-    autoSkip: autoSkip.value,
-    skipThreshold: skipThreshold.value,
-  })
-
-  console.log('[PiP] Setting up video-selected listener')
+  // Listen for video-selected event
   unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
     const payload = event.payload
-    const latestPlaylistState = await api.getPlaylistState()
-    if (
-      payload.playlist_type !== latestPlaylistState.playlist_type ||
-      payload.playlist_version !== latestPlaylistState.playlist_version
-    ) {
-      return
+    console.log('[PiP] Received video-selected event:', payload.video.id, 'index:', payload.index, 'version:', payload.playlist_version)
+    
+    // Get the latest playlist state to check version
+    try {
+      const latestPlaylistState = await api.getPlaylistState()
+      console.log('[PiP] Latest playlist version:', latestPlaylistState.playlist_version)
+      
+      // Only accept events that match the current playlist
+      // Note: We use a more lenient check - if the video is in the current results, accept it
+      if (payload.playlist_type !== latestPlaylistState.playlist_type) {
+        console.log('[PiP] Ignoring event - playlist type mismatch')
+        return
+      }
+      
+      // Accept the event if the version matches or if the index is valid in current results
+      if (payload.playlist_version !== latestPlaylistState.playlist_version) {
+        console.log('[PiP] Version mismatch, but checking if index is valid')
+        // If the index is valid in the current results, still accept it
+        if (payload.index >= 0 && payload.index < latestPlaylistState.results.length) {
+          console.log('[PiP] Index is valid, accepting event')
+        } else {
+          console.log('[PiP] Index is invalid, ignoring event')
+          return
+        }
+      }
+      
+      await handleVideoChange(payload.video, payload.index, payload.has_next)
+    } catch (e) {
+      console.error('[PiP] Error processing video-selected event:', e)
+      // Still try to handle the video change
+      await handleVideoChange(payload.video, payload.index, payload.has_next)
     }
-    console.log('[PiP] Received video-selected event:', payload.video.id, 'index:', payload.index)
-    await handleVideoChange(payload.video, payload.index, payload.has_next)
   })
 
-  unlistenPlaybackSettings = await listen<PlaybackSettings>('playback-settings-changed', (event) => {
-    const settings = event.payload
-    autoPlay.value = settings.auto_play
-    autoSkip.value = settings.auto_skip
-    skipThreshold.value = settings.skip_threshold
+  // Listen for playback-settings-changed event
+  unlistenPlaybackSettings = await listen<PlaybackSettings>('playback-settings-changed', () => {
+    // Settings are handled by the UnifiedPlayer's usePlayerSettings composable
   })
 
+  // Listen for video-watched event
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
     const { video_id, is_watched } = event.payload
     console.log('[PiP] Received video-watched event:', video_id, is_watched)
     if (currentVideo.value?.id === video_id) {
-      currentVideo.value.is_watched = is_watched
+      currentVideo.value = { ...currentVideo.value, is_watched }
     }
   })
 
   // Listen for search results updates from main window
   unlistenSearchResultsUpdated = await listen('search-results-updated', async () => {
     console.log('[PiP] Received search-results-updated event')
-    // Get fresh playlist state after results are updated
-    const playlistState = await api.getPlaylistState()
-    // If we have a current video, update hasNext based on new results
-    if (currentIndex.value >= 0 && currentIndex.value < playlistState.results.length) {
-      hasNext.value = currentIndex.value + 1 < playlistState.results.length
+    try {
+      const playlistState = await api.getPlaylistState()
+      resultsCount.value = playlistState.results.length
+      if (currentIndex.value >= 0 && currentIndex.value < playlistState.results.length) {
+        hasNext.value = currentIndex.value + 1 < playlistState.results.length
+      }
+    } catch (e) {
+      console.error('[PiP] Failed to handle search-results-updated:', e)
     }
   })
 
+  // CRITICAL: Listen for active-playback-cleared event
+  // This fixes the bug where PIP window doesn't reset when search conditions change
+  unlistenActivePlaybackCleared = await listen('active-playback-cleared', () => {
+    console.log('[PiP] Received active-playback-cleared event')
+    handleStateCleared()
+  })
+
+  // Window event handlers
   unlistenResize = await pipWindow.onResized(async () => {
     await saveWindowState()
   })
@@ -306,11 +267,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('message', handleMessage)
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPlaybackSettings) unlistenPlaybackSettings()
   if (unlistenVideoWatched) unlistenVideoWatched()
   if (unlistenSearchResultsUpdated) unlistenSearchResultsUpdated()
+  if (unlistenActivePlaybackCleared) unlistenActivePlaybackCleared()
   if (unlistenResize) unlistenResize()
   if (unlistenMove) unlistenMove()
   if (unlistenClose) unlistenClose()
@@ -319,50 +280,20 @@ onUnmounted(() => {
 
 <template>
   <div class="pip-container">
-    <div class="sidebar">
-      <WatchLaterButton 
-        :video-id="currentVideo?.id || null"
-        :video-title="currentVideo?.title"
-        :thumbnail-url="currentVideo?.thumbnail_url"
-        :disabled="!currentVideo"
-      />
-      <button @click="playPrevious" class="icon-btn" :disabled="currentIndex <= 0" title="上一首">⏮</button>
-      <button @click="togglePlayPause" class="icon-btn play-pause-btn" :disabled="!currentVideo">
-        {{ isPlaying ? '⏸' : '▶' }}
-      </button>
-      <button @click="playNext" class="icon-btn" :disabled="!hasNext" title="下一首">⏭</button>
-    </div>
-
-    <div class="player-column">
-      <div v-if="!currentVideo" class="empty-state">
-        <span>從主視窗選擇影片</span>
-      </div>
-
-      <template v-else>
-        <template v-for="contentSection in pipLayout.content" :key="contentSection.section">
-          <VideoMetaPanel
-            v-if="contentSection.section === 'header' || contentSection.section === 'details'"
-            :video="currentVideo"
-            :uploader-name="getCachedUserNickname(currentVideo)"
-            :uploader-icon-url="getCachedUserIconUrl(currentVideo)"
-            :upload-date-time="formatDateTime(currentVideo.start_time)"
-            :display-mode="contentSection.videoMetaPanelMode"
-          />
-
-          <div v-else class="video-container">
-            <div class="aspect-ratio-box">
-              <iframe
-                ref="iframeRef"
-                :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
-                frameborder="0"
-                allow="autoplay; encrypted-media"
-                allowfullscreen
-              ></iframe>
-            </div>
-          </div>
-        </template>
-      </template>
-    </div>
+    <UnifiedPlayer
+      ref="unifiedPlayerRef"
+      mode="compact"
+      :current-video="currentVideo"
+      :current-video-index="currentIndex"
+      :results-count="resultsCount"
+      :has-next="hasNext"
+      :show-auto-skip="false"
+      :setup-events="false"
+      @play-next="playNext"
+      @play-previous="playPrevious"
+      @video-watched="handleVideoWatched"
+      @state-cleared="handleStateCleared"
+    />
   </div>
 </template>
 
@@ -372,251 +303,5 @@ onUnmounted(() => {
   height: 100vh;
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
-}
-
-.sidebar {
-  width: 50px;
-  min-width: 50px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-md) var(--space-xs);
-  gap: var(--space-sm);
-  background: var(--color-bg-surface);
-  border-right: 1px solid var(--color-border-subtle);
-}
-
-.icon-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  color: var(--color-text-primary);
-  background: transparent;
-  transition: all 0.2s;
-  border: 1px solid transparent;
-  cursor: pointer;
-}
-
-.icon-btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-subtle);
-}
-
-.icon-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.play-pause-btn {
-  width: 42px;
-  height: 42px;
-  font-size: 20px;
-  background: rgba(20, 184, 166, 0.1);
-  color: var(--color-accent-primary);
-  border-color: rgba(20, 184, 166, 0.2);
-}
-
-.play-pause-btn:hover {
-  background: var(--color-accent-primary);
-  color: var(--color-bg-primary);
-}
-
-.player-column {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--color-bg-surface);
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-
-.player-header {
-  padding: var(--space-md);
-  border-bottom: 1px solid var(--color-border-subtle);
-  flex-shrink: 0;
-}
-
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-md);
-  margin-bottom: var(--space-sm);
-}
-
-.video-title {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  flex: 1;
-}
-
-.upload-datetime {
-  font-size: 15px;
-  color: var(--color-text-secondary-light);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.meta-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.uploader-info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--color-bg-hover);
-  object-fit: cover;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.default-avatar {
-  font-size: 14px;
-  color: var(--color-text-muted);
-}
-
-.user-name {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  font-weight: 500;
-}
-
-.stats {
-  display: flex;
-  gap: var(--space-lg);
-}
-
-.stat {
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.stat.views { color: var(--color-stat-views); }
-.stat.likes { color: var(--color-stat-likes); }
-.stat.mylists { color: var(--color-stat-mylists); }
-.stat.comments { color: var(--color-stat-comments); }
-
-.video-container {
-  flex-shrink: 0;
-  background: #000;
-}
-
-.aspect-ratio-box {
-  position: relative;
-  width: 100%;
-  padding-top: 56.25%;
-}
-
-.aspect-ratio-box iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-.info-below-player {
-  flex-shrink: 0;
-  padding: var(--space-sm) var(--space-md);
-}
-
-.tags-section {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: var(--space-sm);
-}
-
-.tag {
-  font-size: var(--font-size-xs);
-  padding: 3px 8px;
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.tag.more {
-  color: var(--color-accent-primary);
-  background: rgba(20, 184, 166, 0.1);
-}
-
-.description-section {
-  border-top: 1px solid var(--color-border-subtle);
-  padding-top: var(--space-sm);
-}
-
-.description-content {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  line-height: 1.7;
-  word-break: break-word;
-}
-
-.description-content.collapsed {
-  max-height: 8em;
-  overflow: hidden;
-}
-
-.description-content :deep(br) {
-  display: block;
-  content: "";
-  margin-bottom: 0.3em;
-}
-
-.description-content :deep(a) {
-  color: var(--color-accent-primary);
-  text-decoration: underline;
-}
-
-.expand-btn {
-  display: block;
-  width: 100%;
-  margin-top: var(--space-xs);
-  padding: var(--space-xs);
-  font-size: var(--font-size-xs);
-  color: var(--color-accent-primary);
-  background: transparent;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.expand-btn:hover {
-  background: var(--color-bg-hover);
 }
 </style>

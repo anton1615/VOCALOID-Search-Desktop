@@ -247,6 +247,25 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.5 - Unified Player Architecture Refactoring
+
+**Highlights:**
+- Refactored player architecture to eliminate code duplication between main window and PIP window
+- Fixed critical bug: PIP window now correctly resets when search conditions change (the `active-playback-cleared` event is now handled in both windows)
+- Created unified composables (`usePlayerCore`, `usePlayerEvents`, `usePlayerSettings`, `usePlayerInfo`) for shared player logic
+- Created `UnifiedPlayer.vue` component supporting both full mode (main window) and compact mode (PIP window)
+- Improved UI layout for player controls with better visual balance and symmetry
+- Main window player column now supports scrolling when description is expanded
+- PIP window sidebar controls are now properly vertically centered
+
+**Technical Implementation:**
+- Extracted player state management into `usePlayerCore.ts` composable
+- Extracted event handling into `usePlayerEvents.ts` with `active-playback-cleared` support
+- Extracted playback settings into `usePlayerSettings.ts`
+- Extracted user info caching into `usePlayerInfo.ts`
+- Created `PlayerControls.vue` with horizontal/vertical layout support
+- Simplified `PlayerColumn.vue` and `PipApp.vue` to use the unified components
+- Fixed i18n initialization in PIP entry point
 
 ### v1.5.4 - Fix Load More Race Condition
 
@@ -257,7 +276,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 **Technical Fix:**
 - Modified `reserve_list_context_version()` to atomically update all browsing parameters (query, sort, filters, exclude_watched, formula_filter) when incrementing the version
 - This ensures `load_more` always sees consistent state, eliminating the race condition window
+
 ### v1.5.3 - URL Copy Box in Player Metadata Panel
+
 
 **Highlights:**
 - Added a URL display box below the embedded player showing the full video URL
