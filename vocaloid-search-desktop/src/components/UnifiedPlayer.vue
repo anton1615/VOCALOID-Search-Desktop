@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Video } from '../api/tauri-commands'
+import { api, type Video } from '../api/tauri-commands'
 import VideoMetaPanel from './VideoMetaPanel.vue'
 import PlayerControls from './PlayerControls.vue'
 import { usePlayerCore } from '../composables/usePlayerCore'
@@ -56,6 +56,7 @@ const playerCore = usePlayerCore({
   onPlayNext: () => emit('playNext'),
   onPlayPrevious: () => emit('playPrevious'),
   onMarkWatched: (video) => {
+    api.markWatched(video.id, video.title, video.thumbnail_url)
     emit('videoWatched', { ...video, is_watched: true })
   },
   onStateCleared: () => {

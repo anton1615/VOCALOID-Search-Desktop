@@ -247,6 +247,27 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.6 - 技術債削減與錯誤修復
+
+**主要變更:**
+- 修復關鍵 bug：影片播放後現在會正確標記為已觀看並寫入歷史記錄（主視窗與 PIP 視窗皆適用）
+- 新增強型別枚舉（`SortField`、`SortDirection`）提升排序的類型安全
+- 建立可重用的 composables（`useSearch`、`useSearchFilters`）處理搜尋邏輯
+- 新增 SQL 查詢建構器與單元測試，提升可維護性
+- 移除所有生產環境的 `println!` 除錯輸出
+- 新增後端與前端的完整單元測試
+
+**錯誤修復:**
+- 修復 `UnifiedPlayer.vue` 中遺漏的 `api.markWatched()` 調用（v1.5.5 重構時遺失）
+
+**技術實作:**
+- 在 `models.rs` 新增 `SortField` 和 `SortDirection` 枚舉，支援 serde 序列化
+- 建立 `build_search_query()` 函數建構 SQL 查詢（僅測試用，向後相容）
+- 建立 `useSearch.ts` composable 處理搜尋狀態管理
+- 建立 `useSearchFilters.ts` composable 處理篩選狀態管理
+- 新增 6 個規格：`search-composable`、`search-filters-composable`、`sql-query-builder`、`typed-sort-enum`、`backend-unit-tests`
+- Phase 2 已準備：建立 `remove-legacy-state-fields` 變更提案
+
 ### v1.5.5 - 統一播放器架構重構
 
 **主要變更:**

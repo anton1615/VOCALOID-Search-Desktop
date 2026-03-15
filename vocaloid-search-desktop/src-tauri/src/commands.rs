@@ -73,7 +73,6 @@ pub async fn set_playlist_index(
     index: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[set_playlist_index] Called with index: {}", index);
 
     let playlist_type = *state.playlist_type.read();
     let list_id = ListContextId::from(playlist_type);
@@ -86,10 +85,8 @@ pub async fn set_playlist_index(
         results
     };
     
-    println!("[set_playlist_index] Playlist type: {:?}, Results length: {}", playlist_type, results.len());
 
     if index >= results.len() {
-        println!("[set_playlist_index] ERROR: Index {} >= len {}", index, results.len());
         return Err("Index out of bounds".to_string());
     }
 
@@ -100,18 +97,15 @@ pub async fn set_playlist_index(
     {
         let mut current_index = state.playlist_index.write();
         *current_index = Some(index);
-        println!("[set_playlist_index] Updated playlist_index to: {}", index);
     }
     
     // Set active playback (new model)
     state.set_active_playback(list_id.clone(), list_version, index);
-    println!("[set_playlist_index] Set active playback: list_id={:?}, version={}, index={}", list_id, list_version, index);
 
     let video = results[index].clone();
     let has_next = index + 1 < results.len();
     let playlist_version = state.get_list_context_version(&list_id);
 
-    println!("[set_playlist_index] Emitting video-selected: video_id={}, index={}, has_next={}, playlist_type={:?}, playlist_version={}", video.id, index, has_next, playlist_type, playlist_version);
 
     app.emit("video-selected", VideoSelectedPayload {
         video,
@@ -121,7 +115,6 @@ pub async fn set_playlist_index(
         playlist_version,
     }).map_err(|e| e.to_string())?;
 
-    println!("[set_playlist_index] Event emitted successfully");
     Ok(())
 }
 
@@ -211,7 +204,6 @@ pub async fn get_search_state(
         search_state.has_next = list_context.has_next;
         search_state.total_count = list_context.total_count;
         search_state.sort = list_context.sort.clone();
-        println!("[get_search_state] Synced from list_context: version={}, page={}, sort={:?}", search_state.version, search_state.page, search_state.sort);
     }
     Ok(search_state)
 }
@@ -248,11 +240,7 @@ pub async fn load_more(
     let current_version = list_context.as_ref().map(|c| c.version).unwrap_or(1);
     let expected_version = expected_version.unwrap_or(current_version);
     
-    println!("[load_more] list_id={:?}, version={}, expected_version={}", 
-        list_id, current_version, expected_version);
-
     if current_version != expected_version {
-        println!("[load_more] Version mismatch: current={}, expected={}, rejecting", current_version, expected_version);
         return Err("Stale load-more request: list context has changed".to_string());
     }
     
@@ -261,9 +249,6 @@ pub async fn load_more(
         Some(ctx) => ctx,
         None => return Err("No list context found".to_string()),
     };
-    
-    println!("[load_more] list_context.sort={:?}, list_context.page={}", 
-        context.sort, context.page);
     
     // Check if there are more results
     if !context.has_next {
@@ -284,14 +269,12 @@ pub async fn load_more(
         formula_filter: context.formula_filter.clone(),
     };
     
-    println!("[load_more] Executing search with page={}, sort={:?}", next_page, request.sort);
     
     // Execute search using helper (does not update any list_context)
     let response = execute_search(&state, &request)?;
     
     // Append new items to list_context and update pagination state
     state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
-    println!("[load_more] Extended list_context: page={}, has_next={}, new_items_count={}", next_page, response.has_next, response.results.len());
     // Also sync search_state and search_results with list_context for restore compatibility
     {
         let mut ss = state.search_state.write();
@@ -300,18 +283,138 @@ pub async fn load_more(
         ss.version = current_version;
         // Sync results from list_context so restore works correctly when playback is on another list
         ss.results = state.list_contexts.read().get(&list_id).map(|c| c.items.clone()).unwrap_or_default();
-        println!("[load_more] Synced search_state: page={}, version={}, results_count={}", ss.page, ss.version, ss.results.len());
     }
     {
         let mut results_lock = state.search_results.write();
         results_lock.extend(response.results.clone());
-        println!("[load_more] Updated search_results: total_count={}", results_lock.len());
     }
     
     // Emit event for UI update
     app.emit("search-results-updated", &response).map_err(|e| e.to_string())?;
     
     Ok(response)
+}
+
+#[cfg(test)]
+fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (String, Vec<String>, String) {
+    let mut sql = String::from(
+        "SELECT v.id, v.title, v.thumbnail_url, v.watch_url, \
+         v.view_count, v.comment_count, v.mylist_count, v.like_count, \
+         v.start_time, v.tags, v.duration, v.uploader_id, v.uploader_name, v.description \
+         FROM videos v"
+    );
+    
+    let mut count_sql = String::from("SELECT COUNT(*) as total FROM videos v");
+    let mut params: Vec<String> = Vec::new();
+    let mut where_clauses: Vec<String> = Vec::new();
+    
+    if !request.query.is_empty() {
+        where_clauses.push("(v.title LIKE ? OR v.tags LIKE ?)".to_string());
+        let query_pattern = format!("%{}%", request.query.replace('%', r"\%").replace('_', r"\_"));
+        params.push(query_pattern.clone());
+        params.push(query_pattern);
+    }
+    
+    if let Some(ref filters) = request.filters {
+        if let Some(ref v) = filters.view {
+            if let Some(gte) = v.gte { 
+                where_clauses.push("v.view_count >= ?".to_string()); 
+                params.push(gte.to_string()); 
+            }
+            if let Some(lte) = v.lte { 
+                where_clauses.push("v.view_count <= ?".to_string()); 
+                params.push(lte.to_string()); 
+            }
+        }
+        if let Some(ref m) = filters.mylist {
+            if let Some(gte) = m.gte { 
+                where_clauses.push("v.mylist_count >= ?".to_string()); 
+                params.push(gte.to_string()); 
+            }
+            if let Some(lte) = m.lte { 
+                where_clauses.push("v.mylist_count <= ?".to_string()); 
+                params.push(lte.to_string()); 
+            }
+        }
+        if let Some(ref c) = filters.comment {
+            if let Some(gte) = c.gte { 
+                where_clauses.push("v.comment_count >= ?".to_string()); 
+                params.push(gte.to_string()); 
+            }
+            if let Some(lte) = c.lte { 
+                where_clauses.push("v.comment_count <= ?".to_string()); 
+                params.push(lte.to_string()); 
+            }
+        }
+        if let Some(ref l) = filters.like {
+            if let Some(gte) = l.gte { 
+                where_clauses.push("v.like_count >= ?".to_string()); 
+                params.push(gte.to_string()); 
+            }
+            if let Some(lte) = l.lte { 
+                where_clauses.push("v.like_count <= ?".to_string()); 
+                params.push(lte.to_string()); 
+            }
+        }
+        if let Some(ref t) = filters.start_time {
+            if let Some(ref gte) = t.gte {
+                let gte_str = format!("{}T00:00:00+09:00", gte);
+                where_clauses.push("v.start_time >= ?".to_string());
+                params.push(gte_str);
+            }
+            if let Some(ref lte) = t.lte {
+                let lte_str = format!("{}T23:59:59+09:00", lte);
+                where_clauses.push("v.start_time <= ?".to_string());
+                params.push(lte_str);
+            }
+        }
+    }
+    
+    if !watched_ids.is_empty() {
+        let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
+        where_clauses.push(format!("v.id NOT IN ({})", placeholders.join(", ")));
+        for id in watched_ids {
+            params.push(id.clone());
+        }
+    }
+    
+    if !where_clauses.is_empty() {
+        let where_clause = format!(" WHERE {}", where_clauses.join(" AND "));
+        sql.push_str(&where_clause);
+        count_sql.push_str(&where_clause);
+    }
+    
+    let order_by = if let Some(ref sort) = request.sort {
+        let field = match sort.by {
+            SortField::View => "v.view_count",
+            SortField::Mylist => "v.mylist_count",
+            SortField::Comment => "v.comment_count",
+            SortField::Like => "v.like_count",
+            SortField::StartTime => "v.start_time",
+            SortField::Custom => {
+                if let Some(ref weights) = sort.weights {
+                    &format!(
+                        "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
+                        weights.view, weights.mylist, weights.comment, weights.like
+                    )
+                } else {
+                    "v.view_count"
+                }
+            }
+            SortField::WatchedAt | SortField::AddedAt => "v.view_count",
+        };
+        let direction = match sort.direction {
+            SortDirection::Asc => "ASC",
+            SortDirection::Desc => "DESC",
+        };
+        format!(" ORDER BY {} {}", field, direction)
+    } else {
+        " ORDER BY v.view_count DESC".to_string()
+    };
+    
+    sql.push_str(&order_by);
+    
+    (sql, params, count_sql)
 }
 
 fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchResponse, String> {
@@ -391,13 +494,13 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     }).unwrap_or(0);
     
     let order_by = if let Some(ref sort) = request.sort {
-        let field = match sort.by.as_str() {
-            "view" => "v.view_count",
-            "mylist" => "v.mylist_count",
-            "comment" => "v.comment_count",
-            "like" => "v.like_count",
-            "start_time" => "v.start_time",
-            "custom" => {
+        let field = match sort.by {
+            SortField::View => "v.view_count",
+            SortField::Mylist => "v.mylist_count",
+            SortField::Comment => "v.comment_count",
+            SortField::Like => "v.like_count",
+            SortField::StartTime => "v.start_time",
+            SortField::Custom => {
                 if let Some(ref weights) = sort.weights {
                     &format!(
                         "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
@@ -407,9 +510,12 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
                     "v.view_count"
                 }
             }
-            _ => "v.view_count",
+            SortField::WatchedAt | SortField::AddedAt => "v.view_count",
         };
-        let direction = if sort.direction == "asc" { "ASC" } else { "DESC" };
+        let direction = match sort.direction {
+            SortDirection::Asc => "ASC",
+            SortDirection::Desc => "DESC",
+        };
         format!(" ORDER BY {} {}", field, direction)
     } else {
         " ORDER BY v.view_count DESC".to_string()
@@ -470,7 +576,6 @@ pub async fn search(
     request: SearchRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<SearchResponse, String> {
-    println!("[search] Called with page={}, sort={:?}", request.page, request.sort);
     
     // For new searches (page 1), reserve version upfront to invalidate in-flight load_more
     let reserved_version = if request.page == 1 {
@@ -482,7 +587,6 @@ pub async fn search(
             request.exclude_watched,
             request.formula_filter.clone(),
         );
-        println!("[search] Reserved version {} for new search", v);
         Some(v)
     } else {
         None
@@ -589,13 +693,13 @@ pub async fn search(
     }).unwrap_or(0);
     
     let order_by = if let Some(ref sort) = request.sort {
-        let field = match sort.by.as_str() {
-            "view" => "v.view_count",
-            "mylist" => "v.mylist_count",
-            "comment" => "v.comment_count",
-            "like" => "v.like_count",
-            "start_time" => "v.start_time",
-            "custom" => {
+        let field = match sort.by {
+            SortField::View => "v.view_count",
+            SortField::Mylist => "v.mylist_count",
+            SortField::Comment => "v.comment_count",
+            SortField::Like => "v.like_count",
+            SortField::StartTime => "v.start_time",
+            SortField::Custom => {
                 if let Some(ref weights) = sort.weights {
                     &format!(
                         "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
@@ -605,9 +709,12 @@ pub async fn search(
                     "v.view_count"
                 }
             }
-            _ => "v.view_count",
+            SortField::WatchedAt | SortField::AddedAt => "v.view_count",
         };
-        let direction = if sort.direction == "asc" { "ASC" } else { "DESC" };
+        let direction = match sort.direction {
+            SortDirection::Asc => "ASC",
+            SortDirection::Desc => "DESC",
+        };
         format!(" ORDER BY {} {}", field, direction)
     } else {
         " ORDER BY v.view_count DESC".to_string()
@@ -663,10 +770,8 @@ pub async fn search(
             request.formula_filter.clone(),
         );
         if success {
-            println!("[search] Finalized list_context with version {}", v);
             v
         } else {
-            println!("[search] WARNING: Failed to finalize, version changed");
             state.get_list_context_version(&ListContextId::Search)
         }
     } else {
@@ -704,7 +809,6 @@ pub async fn search(
         // Clear active playback for Search when query changes
         state.clear_active_playback_for_list(&ListContextId::Search);
         app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
-        println!("[search] Updated search_state: sort={:?}, page=1, version={}", ss.sort, ss.version);
     } else {
         // Update pagination state for subsequent pages
         let mut ss = state.search_state.write();
@@ -712,7 +816,6 @@ pub async fn search(
         ss.has_next = has_next;
         ss.results = state.search_results.read().clone();
         ss.version = list_version;
-        println!("[search] Updated search_state for pagination: page={}, version={}", ss.page, ss.version);
     }
 
 
@@ -1010,14 +1113,17 @@ pub async fn get_history(
     }).collect();
     
     let has_next = (page * page_size) < total;
-    let requested_sort = sort_direction.clone().unwrap_or_else(|| "desc".to_string());
+    let requested_sort: SortDirection = sort_direction
+        .as_deref()
+        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok())
+        .unwrap_or(SortDirection::Desc);
     
     // Update History list_context
     if page == 1 {
         // Reserve version and update list_context for new history view
         let sort_config = crate::models::SortConfig {
-            by: "watched_at".to_string(),
-            direction: requested_sort.clone(),
+            by: SortField::WatchedAt,
+            direction: requested_sort,
             weights: None,
         };
         
@@ -1048,7 +1154,7 @@ pub async fn get_history(
         
         // Also update legacy history_state
         let mut history_state = state.history_state.write();
-        history_state.sort_direction = requested_sort.clone();
+        history_state.sort_direction = requested_sort.into();
         history_state.page = page;
         history_state.page_size = page_size;
         history_state.total_count = total;
@@ -1656,13 +1762,16 @@ pub async fn get_watch_later(
     }).collect();
     
     let has_next = (page * page_size) < total;
-    let requested_sort = sort_direction.clone().unwrap_or_else(|| "desc".to_string());
+    let requested_sort: SortDirection = sort_direction
+        .as_deref()
+        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok())
+        .unwrap_or(SortDirection::Desc);
     
     // Update WatchLater list_context
     if page == 1 {
         let sort_config = crate::models::SortConfig {
-            by: "added_at".to_string(),
-            direction: requested_sort.clone(),
+            by: SortField::AddedAt,
+            direction: requested_sort,
             weights: None,
         };
         
@@ -1692,7 +1801,7 @@ pub async fn get_watch_later(
         
         // Also update legacy watch_later_state
         let mut watch_later_state = state.watch_later_state.write();
-        watch_later_state.sort_direction = requested_sort;
+        watch_later_state.sort_direction = requested_sort.into();
         watch_later_state.page = page;
         watch_later_state.page_size = page_size;
         watch_later_state.total_count = total;
@@ -1746,7 +1855,7 @@ pub async fn get_history_state(
         history_state.has_next = list_context.has_next;
         history_state.total_count = list_context.total_count;
         if let Some(ref sort) = list_context.sort {
-            history_state.sort_direction = sort.direction.clone();
+            history_state.sort_direction = sort.direction.into();
         }
     }
     Ok(history_state)
@@ -1779,7 +1888,7 @@ pub async fn get_watch_later_state(
         watch_later_state.has_next = list_context.has_next;
         watch_later_state.total_count = list_context.total_count;
         if let Some(ref sort) = list_context.sort {
-            watch_later_state.sort_direction = sort.direction.clone();
+            watch_later_state.sort_direction = sort.direction.into();
         }
     }
     Ok(watch_later_state)
@@ -2002,4 +2111,170 @@ struct ThumbInfo {
     tags: Option<Vec<String>>,
     user_id: Option<String>,
     user_nickname: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_default_sort() -> SortConfig {
+        SortConfig {
+            by: SortField::View,
+            direction: SortDirection::Desc,
+            weights: None,
+        }
+    }
+
+    #[test]
+    fn build_query_without_filters() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let (sql, params, count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("SELECT v.id"));
+        assert!(sql.contains("FROM videos v"));
+        assert!(!sql.contains("WHERE"));
+        assert!(params.is_empty());
+        assert!(count_sql.contains("COUNT(*)"));
+    }
+
+    #[test]
+    fn build_query_with_search_query() {
+        let request = SearchRequest {
+            query: "VOCALOID".to_string(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("v.title LIKE ? OR v.tags LIKE ?"));
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn build_query_with_view_filter() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: Some(Filters {
+                view: Some(NumericFilter { gte: Some(1000.0), lte: None }),
+                ..Default::default()
+            }),
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("v.view_count >= ?"));
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn build_query_with_date_filter() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: Some(Filters {
+                start_time: Some(DateFilter { 
+                    gte: Some("2024-01-01".to_string()), 
+                    lte: None 
+                }),
+                ..Default::default()
+            }),
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("v.start_time >= ?"));
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn build_query_with_sort_by_mylist() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(SortConfig {
+                by: SortField::Mylist,
+                direction: SortDirection::Asc,
+                weights: None,
+            }),
+            formula_filter: None,
+        };
+        
+        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("ORDER BY v.mylist_count ASC"));
+    }
+
+    #[test]
+    fn build_query_with_custom_sort_with_weights() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(SortConfig {
+                by: SortField::Custom,
+                direction: SortDirection::Desc,
+                weights: Some(SortWeights {
+                    view: 0.5,
+                    mylist: 0.3,
+                    comment: 0.1,
+                    like: 0.1,
+                }),
+            }),
+            formula_filter: None,
+        };
+        
+        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("ORDER BY"));
+        assert!(sql.contains("v.view_count"));
+        assert!(sql.contains("v.mylist_count"));
+    }
+
+    #[test]
+    fn build_query_with_exclude_watched() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: true,
+            filters: None,
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let watched_ids = vec!["sm123".to_string(), "sm456".to_string()];
+        let (sql, params, _count_sql) = build_search_query(&request, &watched_ids);
+        
+        assert!(sql.contains("v.id NOT IN"));
+        assert_eq!(params.len(), 2);
+    }
 }

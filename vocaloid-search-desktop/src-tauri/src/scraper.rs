@@ -91,15 +91,11 @@ impl Scraper {
             }
         });
         
-        let mut round_num = 1;
-        
         loop {
             if self.is_cancelled() {
-                println!("Scraper cancelled at round {}", round_num);
                 return Err(Box::new(CancelledError));
             }
             
-            println!("Fetching round {}...", round_num);
             
             let mut params = vec![
                 ("q", self.config.query.as_str()),
@@ -127,22 +123,16 @@ impl Scraper {
             }
             
             let mut offset = 0;
-            let mut round_count = 0;
             let mut round_last_time: Option<String> = None;
             
             while offset < MAX_OFFSET {
                 if self.is_cancelled() {
-                    println!("Scraper cancelled at offset {}", offset);
                     return Err(Box::new(CancelledError));
                 }
                 
                 let offset_str = offset.to_string();
                 let mut request_params = params.clone();
                 request_params.push(("_offset", offset_str.as_str()));
-                
-                // Build URL for logging
-                let url = reqwest::Url::parse_with_params(SNAPSHOT_API, &request_params).unwrap();
-                println!("  Requesting: offset={}, url={}", offset, url);
                 
                 let response = match self.client
                     .get(SNAPSHOT_API)
@@ -152,29 +142,23 @@ impl Scraper {
                     .await
                 {
                     Ok(r) => r,
-                    Err(e) => {
-                        println!("HTTP error: {}", e);
+                    Err(_e) => {
                         break;
                     }
                 };
                 
                 let status = response.status().as_u16();
-                println!("  Response status: {}", status);
                 
                 if !response.status().is_success() {
                     if status == 400 && offset >= MAX_OFFSET - 100 {
-                        println!("Reached API offset limit at {}", offset);
                         break;
                     }
-                    let body = response.text().await.unwrap_or_default();
-                    println!("API error {}: {}", status, body);
                     break;
                 }
                 
                 let data: serde_json::Value = match response.json().await {
                     Ok(d) => d,
-                    Err(e) => {
-                        println!("JSON parse error: {}", e);
+                    Err(_e) => {
                         break;
                     }
                 };
@@ -184,9 +168,6 @@ impl Scraper {
                         .and_then(|m| m.get("totalCount"))
                         .and_then(|c| c.as_u64())
                         .map(|c| c as usize);
-                    if let Some(total) = api_reported_total {
-                        println!("  API reports total: {}", total);
-                    }
                 }
                 
                 let videos = data.get("data")
@@ -194,70 +175,43 @@ impl Scraper {
                     .cloned()
                     .unwrap_or_default();
                 
-                println!("  Received {} videos in response", videos.len());
                 
                 if videos.is_empty() {
-                    println!("  No more videos from API");
                     break;
                 }
                 
                 let videos_len = videos.len();
-                let mut parse_success = 0usize;
-                let mut parse_fail = 0usize;
-                let mut duplicate_count = 0usize;
                 
-                for (idx, video_value) in videos.iter().enumerate() {
+                for video_value in videos.iter() {
                     match serde_json::from_value::<SnapshotVideo>(video_value.clone()) {
                         Ok(video) => {
-                            parse_success += 1;
                             let video_id = video.contentId.clone();
                             let video_start_time = video.startTime.clone();
                             if !seen_ids.contains(&video_id) {
                                 seen_ids.insert(video_id);
                                 all_videos.push(video);
                                 total_fetched += 1;
-                                round_count += 1;
                                 round_last_time = video_start_time;
-                            } else {
-                                duplicate_count += 1;
                             }
                         }
-                        Err(e) => {
-                            parse_fail += 1;
-                            if parse_fail <= 3 {
-                                println!("  Parse error #{}: {}", parse_fail, e);
-                                if idx == 0 {
-                                    println!("  First video JSON: {:?}", video_value);
-                                }
-                            }
-                        }
+                        Err(_) => {}
                     }
                 }
                 
-                println!("  Parsed: {} success, {} fail, {} duplicates", parse_success, parse_fail, duplicate_count);
                 
                 progress_callback(total_fetched, api_reported_total);
                 
                 offset += videos_len;
-                
-                if total_fetched % 10000 == 0 {
-                    println!("  Total fetched: {}", total_fetched);
-                }
             }
             
-            println!("  Round {} complete: {} new videos", round_num, round_count);
             
             if round_last_time.is_none() || round_last_time == last_start_time {
-                println!("  No progress, stopping");
                 break;
             }
             
             last_start_time = round_last_time;
-            round_num += 1;
-            println!("  Continuing with start_time <= {:?}", last_start_time);
         }
         
-        println!("Fetch complete: {} total videos", total_fetched);
         
         Ok(ScraperResult {
             videos: all_videos,

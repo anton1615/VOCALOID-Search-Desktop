@@ -247,6 +247,27 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.6 - Technical Debt Reduction & Bug Fix
+
+**Highlights:**
+- Fixed critical bug: Videos are now correctly marked as watched in history when played (both main window and PIP)
+- Added typed enums (`SortField`, `SortDirection`) for better type safety in sorting
+- Created reusable composables (`useSearch`, `useSearchFilters`) for search logic
+- Added SQL query builder with unit tests for better maintainability
+- Removed all debug `println!` output from production code
+- Added comprehensive unit tests for backend and frontend
+
+**Bug Fix:**
+- Fixed missing `api.markWatched()` call in `UnifiedPlayer.vue` that was lost during v1.5.5 refactoring
+
+**Technical Implementation:**
+- Added `SortField` and `SortDirection` enums in `models.rs` with serde serialization
+- Created `build_search_query()` function for SQL query construction (test-only, backward compatible)
+- Created `useSearch.ts` composable with search state management
+- Created `useSearchFilters.ts` composable with filter state management
+- Added 6 new specs: `search-composable`, `search-filters-composable`, `sql-query-builder`, `typed-sort-enum`, `backend-unit-tests`
+- Phase 2 prepared: `remove-legacy-state-fields` change proposal created
+
 ### v1.5.5 - Unified Player Architecture Refactoring
 
 **Highlights:**

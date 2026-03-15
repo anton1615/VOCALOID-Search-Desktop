@@ -185,6 +185,53 @@ fn default_weight() -> f64 {
     1.0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortField {
+    View,
+    Mylist,
+    Comment,
+    Like,
+    StartTime,
+    Custom,
+    WatchedAt,
+    AddedAt,
+}
+
+impl Default for SortField {
+    fn default() -> Self {
+        SortField::View
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+impl Default for SortDirection {
+    fn default() -> Self {
+        SortDirection::Desc
+    }
+}
+
+impl SortDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SortDirection::Asc => "asc",
+            SortDirection::Desc => "desc",
+        }
+    }
+}
+
+impl From<SortDirection> for String {
+    fn from(dir: SortDirection) -> Self {
+        dir.as_str().to_string()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormulaFilter {
     pub view_weight: f64,
@@ -196,8 +243,10 @@ pub struct FormulaFilter {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SortConfig {
-    pub by: String,
-    pub direction: String,
+    #[serde(default)]
+    pub by: SortField,
+    #[serde(default)]
+    pub direction: SortDirection,
     pub weights: Option<SortWeights>,
 }
 
@@ -483,4 +532,95 @@ where
     }
 
     deserializer.deserialize_any(UserIdVisitor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sort_field_serializes_to_lowercase() {
+        assert_eq!(serde_json::to_string(&SortField::View).unwrap(), "\"view\"");
+        assert_eq!(
+            serde_json::to_string(&SortField::Mylist).unwrap(),
+            "\"mylist\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SortField::Comment).unwrap(),
+            "\"comment\""
+        );
+        assert_eq!(serde_json::to_string(&SortField::Like).unwrap(), "\"like\"");
+        assert_eq!(
+            serde_json::to_string(&SortField::StartTime).unwrap(),
+            "\"starttime\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SortField::Custom).unwrap(),
+            "\"custom\""
+        );
+    }
+
+    #[test]
+    fn sort_field_deserializes_from_lowercase_string() {
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"view\"").unwrap(),
+            SortField::View
+        );
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"mylist\"").unwrap(),
+            SortField::Mylist
+        );
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"comment\"").unwrap(),
+            SortField::Comment
+        );
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"like\"").unwrap(),
+            SortField::Like
+        );
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"starttime\"").unwrap(),
+            SortField::StartTime
+        );
+        assert_eq!(
+            serde_json::from_str::<SortField>("\"custom\"").unwrap(),
+            SortField::Custom
+        );
+    }
+
+    #[test]
+    fn sort_direction_serializes_to_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&SortDirection::Asc).unwrap(),
+            "\"asc\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SortDirection::Desc).unwrap(),
+            "\"desc\""
+        );
+    }
+
+    #[test]
+    fn sort_direction_deserializes_from_lowercase_string() {
+        assert_eq!(
+            serde_json::from_str::<SortDirection>("\"asc\"").unwrap(),
+            SortDirection::Asc
+        );
+        assert_eq!(
+            serde_json::from_str::<SortDirection>("\"desc\"").unwrap(),
+            SortDirection::Desc
+        );
+    }
+
+    #[test]
+    fn invalid_sort_field_rejected() {
+        let result = serde_json::from_str::<SortField>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_sort_direction_rejected() {
+        let result = serde_json::from_str::<SortDirection>("\"invalid\"");
+        assert!(result.is_err());
+    }
 }

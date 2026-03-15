@@ -27,7 +27,6 @@ pub fn run() {
             if old_db_path.exists() && !videos_db_path.exists() {
                 // Migration: rename old data.db to videos.db, create new user_data.db
                 let _ = std::fs::rename(&old_db_path, &videos_db_path);
-                println!("Migrated data.db to videos.db");
             }
             
             database::init_db(&videos_db_path, &user_data_db_path).expect("Failed to initialize database");

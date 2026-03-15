@@ -247,6 +247,27 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.6 - 技術的負債削減とバグ修正
+
+**主な変更点:**
+- 重要なバグを修正：動画再生後に履歴に正しく「視聴済み」としてマークされるようになりました（メインウィンドウとPiPウィンドウ両対応）
+- ソートの型安全性を向上させるための型付き列挙型（`SortField`、`SortDirection`）を追加
+- 検索ロジック用の再利用可能なcomposables（`useSearch`、`useSearchFilters`）を作成
+- 保守性向上のため単体テスト付きのSQLクエリビルダーを追加
+- 本番コードからすべてのデバッグ用 `println!` 出力を削除
+- バックエンドとフロントエンドの包括的な単体テストを追加
+
+**バグ修正:**
+- v1.5.5リファクタリング時に失われた `api.markWatched()` 呼び出しを `UnifiedPlayer.vue` で修正
+
+**技術的実装:**
+- `models.rs` に serde シリアライゼーション付きの `SortField` と `SortDirection` 列挙型を追加
+- SQLクエリ構築用の `build_search_query()` 関数を作成（テスト用、後方互換）
+- 検索状態管理用の `useSearch.ts` composable を作成
+- フィルタ状態管理用の `useSearchFilters.ts` composable を作成
+- 6つの新しい仕様を追加：`search-composable`、`search-filters-composable`、`sql-query-builder`、`typed-sort-enum`、`backend-unit-tests`
+- Phase 2準備完了：`remove-legacy-state-fields` 変更提案を作成
+
 ### v1.5.5 - 統一プレイヤーアーキテクチャリファクタリング
 
 **主な変更点:**

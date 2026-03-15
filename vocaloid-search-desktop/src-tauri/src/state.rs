@@ -213,7 +213,6 @@ impl AppState {
         if let Some(context) = contexts.get_mut(list_id) {
             // Verify version hasn't changed
             if context.version != expected_version {
-                println!("[extend_list_context_items] Version mismatch: expected={}, actual={}", expected_version, context.version);
                 return false;
             }
             context.items.extend(new_items);
@@ -246,7 +245,6 @@ impl AppState {
         if let Some(context) = contexts.get_mut(&list_id) {
             // Verify version hasn't changed
             if context.version != reserved_version {
-                println!("[finalize_list_context_search] Version mismatch: expected={}, actual={}", reserved_version, context.version);
                 return false;
             }
             context.items = items;
