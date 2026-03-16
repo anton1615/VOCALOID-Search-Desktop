@@ -183,18 +183,15 @@ impl Scraper {
                 let videos_len = videos.len();
                 
                 for video_value in videos.iter() {
-                    match serde_json::from_value::<SnapshotVideo>(video_value.clone()) {
-                        Ok(video) => {
-                            let video_id = video.contentId.clone();
-                            let video_start_time = video.startTime.clone();
-                            if !seen_ids.contains(&video_id) {
-                                seen_ids.insert(video_id);
-                                all_videos.push(video);
-                                total_fetched += 1;
-                                round_last_time = video_start_time;
-                            }
+                    if let Ok(video) = serde_json::from_value::<SnapshotVideo>(video_value.clone()) {
+                        let video_id = video.contentId.clone();
+                        let video_start_time = video.startTime.clone();
+                        if !seen_ids.contains(&video_id) {
+                            seen_ids.insert(video_id);
+                            all_videos.push(video);
+                            total_fetched += 1;
+                            round_last_time = video_start_time;
                         }
-                        Err(_) => {}
                     }
                 }
                 
@@ -290,7 +287,6 @@ pub fn get_daily_update_threshold() -> String {
     
     let today_6am_jst = jst_offset.with_ymd_and_hms(now_jst.year(), now_jst.month(), now_jst.day(), 6, 0, 0)
         .single()
-        .unwrap_or_else(|| now_jst);
-    
+        .unwrap_or(now_jst);
     today_6am_jst.format("%Y-%m-%d %H:%M:%S").to_string()
 }

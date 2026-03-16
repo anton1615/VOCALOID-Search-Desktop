@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.7 - レガシー状態フィールドの削除
+
+**主な変更点:**
+- Rustバックエンドからレガシー状態フィールド（`playlist_index`、`search_results`、`history_results`、`watch_later_results`、`playlist_type`）を削除
+- 状態管理が`ListContext`モデルに統一されました
+- ブラウジングコンテキスト追跡用の`set_browsing_list()`メソッドを追加
+- すべてのclippy警告を修正し、コードをクリーンに
+
+**技術的な実装:**
+- `playlist_index` → `active_playback.current_index`
+- `*_results`フィールド → `list_contexts[id].items`
+- `playlist_type` → `active_playback.list_id`（`set_browsing_list()`経由）
+- AGENTS.mdにアーキテクチャ決定記録を追加
+- resolve-technical-debtから7つのdelta specsをメインspecsに同期
+
+**メリット:**
+- 状態同期の複雑さを削減
+- すべてのリストデータの単一の真実の情報源
+- 保守性とコードの明確さが向上
+
+
+## リリースノート
+
 ### v1.5.6 - 技術的負債削減とバグ修正
 
 **主な変更点:**

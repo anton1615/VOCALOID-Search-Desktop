@@ -8,11 +8,8 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 fn playlist_results_for_type(state: &AppState, playlist_type: PlaylistType) -> Vec<Video> {
-    match playlist_type {
-        PlaylistType::Search => state.search_results.read().clone(),
-        PlaylistType::History => state.history_results.read().clone(),
-        PlaylistType::WatchLater => state.watch_later_results.read().clone(),
-    }
+    let list_id = ListContextId::from(playlist_type);
+    state.get_list_context_items(&list_id)
 }
 
 fn playlist_version_for_type(state: &AppState, playlist_type: PlaylistType) -> u64 {
@@ -52,18 +49,16 @@ pub async fn get_playlist_state(
         }
     }
     
-    // No active playback - return empty state
-    let playlist_type = *state.playlist_type.read();
+    // No active playback - return empty state with default Search
     let pip_active = *state.pip_active.read();
-    let playlist_version = playlist_version_for_type(&state, playlist_type);
 
     Ok(PlaylistState {
-        playlist_type,
+        playlist_type: PlaylistType::Search,
         results: vec![],
         index: None,
         has_next: false,
         pip_active,
-        playlist_version,
+        playlist_version: 1,
     })
 }
 
@@ -73,11 +68,14 @@ pub async fn set_playlist_index(
     index: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-
-    let playlist_type = *state.playlist_type.read();
-    let list_id = ListContextId::from(playlist_type);
-    
-    // Get results from list_contexts first (new model), fallback to legacy
+    // Get list_id from active_playback (set by set_playlist_type)
+    let active_playback = state.active_playback.read();
+    let list_id = active_playback.as_ref()
+        .map(|p| p.list_id.clone())
+        .ok_or_else(|| "No active playback. Call set_playlist_type first.".to_string())?;
+    let playlist_type = PlaylistType::from(&list_id);
+    drop(active_playback);
+    // Get results from list_contexts
     let results = state.get_list_context_items(&list_id);
     let results = if results.is_empty() {
         playlist_results_for_type(&state, playlist_type)
@@ -85,7 +83,6 @@ pub async fn set_playlist_index(
         results
     };
     
-
     if index >= results.len() {
         return Err("Index out of bounds".to_string());
     }
@@ -93,19 +90,12 @@ pub async fn set_playlist_index(
     // Get current version from list_context
     let list_version = state.get_list_context_version(&list_id);
     
-    // Update legacy playlist_index
-    {
-        let mut current_index = state.playlist_index.write();
-        *current_index = Some(index);
-    }
-    
-    // Set active playback (new model)
+    // Set active playback
     state.set_active_playback(list_id.clone(), list_version, index);
 
     let video = results[index].clone();
     let has_next = index + 1 < results.len();
     let playlist_version = state.get_list_context_version(&list_id);
-
 
     app.emit("video-selected", VideoSelectedPayload {
         video,
@@ -124,20 +114,17 @@ pub async fn update_playlist_video(
     video: Video,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let playlist_type = *state.playlist_type.read();
-
-    let mut results = match playlist_type {
-        PlaylistType::Search => state.search_results.write(),
-        PlaylistType::History => state.history_results.write(),
-        PlaylistType::WatchLater => state.watch_later_results.write(),
-    };
-    
-    if index >= results.len() {
-        return Err("Index out of bounds".to_string());
+    // Get list_id from active_playback
+    let active_playback = state.active_playback.read();
+    let list_id = active_playback.as_ref()
+        .map(|p| p.list_id.clone())
+        .ok_or_else(|| "No active playback.".to_string())?;
+    drop(active_playback);
+    if state.update_list_context_item(&list_id, index, video.clone()) {
+        Ok(())
+    } else {
+        Err("Index out of bounds or list not found".to_string())
     }
-    
-    results[index] = video;
-    Ok(())
 }
 
 #[tauri::command]
@@ -275,7 +262,7 @@ pub async fn load_more(
     
     // Append new items to list_context and update pagination state
     state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
-    // Also sync search_state and search_results with list_context for restore compatibility
+    // Also sync search_state with list_context for restore compatibility
     {
         let mut ss = state.search_state.write();
         ss.page = next_page;
@@ -283,10 +270,6 @@ pub async fn load_more(
         ss.version = current_version;
         // Sync results from list_context so restore works correctly when playback is on another list
         ss.results = state.list_contexts.read().get(&list_id).map(|c| c.items.clone()).unwrap_or_default();
-    }
-    {
-        let mut results_lock = state.search_results.write();
-        results_lock.extend(response.results.clone());
     }
     
     // Emit event for UI update
@@ -502,7 +485,7 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
             SortField::StartTime => "v.start_time",
             SortField::Custom => {
                 if let Some(ref weights) = sort.weights {
-                    &format!(
+                    format!(
                         "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
                         weights.view, weights.mylist, weights.comment, weights.like
                     ).leak()
@@ -701,7 +684,7 @@ pub async fn search(
             SortField::StartTime => "v.start_time",
             SortField::Custom => {
                 if let Some(ref weights) = sort.weights {
-                    &format!(
+                    format!(
                         "({} * v.view_count + {} * v.mylist_count + {} * v.comment_count + {} * v.like_count)",
                         weights.view, weights.mylist, weights.comment, weights.like
                     ).leak()
@@ -814,19 +797,8 @@ pub async fn search(
         let mut ss = state.search_state.write();
         ss.page = request.page;
         ss.has_next = has_next;
-        ss.results = state.search_results.read().clone();
+        ss.results = state.list_contexts.read().get(&ListContextId::Search).map(|c| c.items.clone()).unwrap_or_default();
         ss.version = list_version;
-    }
-
-
-    // Also update legacy search_results for backwards compatibility
-    {
-        let mut results_lock = state.search_results.write();
-        if request.page == 1 {
-            *results_lock = results.clone();
-        } else {
-            results_lock.extend(results.clone());
-        }
     }
 
     Ok(SearchResponse {
@@ -1049,14 +1021,15 @@ pub async fn mark_watched(
     // 1. Update database
     state.db.mark_watched(&video_id, &title, thumbnail_url.as_deref()).map_err(|e| e.to_string())?;
     
-    // 2. Update AppState.search_results
+    // 2. Update is_watched in all list contexts
     {
-        let mut results = state.search_results.write();
-        if let Some(video) = results.iter_mut().find(|v| v.id == video_id) {
-            video.is_watched = true;
+        let mut contexts = state.list_contexts.write();
+        for (_, context) in contexts.iter_mut() {
+            if let Some(video) = context.items.iter_mut().find(|v| v.id == video_id) {
+                video.is_watched = true;
+            }
         }
     }
-    
     // 3. Emit event for UI update
     app.emit("video-watched", serde_json::json!({
         "video_id": video_id,
@@ -1166,16 +1139,6 @@ pub async fn get_history(
             context.items.extend(results.clone());
             context.page = page;
             context.has_next = has_next;
-        }
-    }
-
-    // Update legacy history_results
-    {
-        let mut state_results = state.history_results.write();
-        if page == 1 {
-            *state_results = results;
-        } else {
-            state_results.extend(results);
         }
     }
 
@@ -1422,12 +1385,16 @@ pub async fn open_pip_window(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let playlist_type = *state.playlist_type.read();
-    let current_index = *state.playlist_index.read();
+    // Read from active_playback
+    let active_playback = state.active_playback.read();
+    let current_index = active_playback.as_ref().map(|p| p.current_index);
+    let playlist_type = active_playback.as_ref()
+        .map(|p| PlaylistType::from(&p.list_id))
+        .unwrap_or(PlaylistType::Search);
+    drop(active_playback);
 
     let results = playlist_results_for_type(&state, playlist_type);
     let current_video = current_index.and_then(|index| results.get(index).cloned());
-    
     let saved_state = crate::database::load_pip_window_state(&app);
     let width = saved_state.as_ref().map(|s| s.width as f64).unwrap_or(450.0);
     let height = saved_state.as_ref().map(|s| s.height as f64).unwrap_or(500.0);
@@ -1569,17 +1536,20 @@ pub async fn select_video(
 pub async fn play_next(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
-    let playlist_type = *state.playlist_type.read();
-    let mut index = state.playlist_index.write();
-    let results = playlist_results_for_type(&state, playlist_type);
-
-    let Some(current_index) = *index else {
+    // Read from active_playback (new model)
+    let active_playback = state.active_playback.read();
+    let Some(playback) = active_playback.as_ref() else {
         return Ok(None);
     };
+    let playlist_type = PlaylistType::from(&playback.list_id);
+    let current_index = playback.current_index;
+    drop(active_playback);
+
+    let results = playlist_results_for_type(&state, playlist_type);
 
     if current_index + 1 < results.len() {
         let next_index = current_index + 1;
-        *index = Some(next_index);
+        state.set_active_playback_index(next_index);
         Ok(Some(results[next_index].clone()))
     } else {
         Ok(None)
@@ -1590,23 +1560,24 @@ pub async fn play_next(
 pub async fn play_previous(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
-    let playlist_type = *state.playlist_type.read();
-    let mut index = state.playlist_index.write();
-
-    let Some(current_index) = *index else {
+    // Read from active_playback (new model)
+    let active_playback = state.active_playback.read();
+    let Some(playback) = active_playback.as_ref() else {
         return Ok(None);
     };
+    let playlist_type = PlaylistType::from(&playback.list_id);
+    let current_index = playback.current_index;
+    drop(active_playback);
 
     if current_index > 0 {
         let previous_index = current_index - 1;
-        *index = Some(previous_index);
+        state.set_active_playback_index(previous_index);
         let results = playlist_results_for_type(&state, playlist_type);
         Ok(Some(results[previous_index].clone()))
     } else {
         Ok(None)
     }
 }
-
 #[tauri::command]
 pub fn get_database_path(
     app: tauri::AppHandle,
@@ -1816,16 +1787,6 @@ pub async fn get_watch_later(
         }
     }
 
-    // Update legacy watch_later_results
-    {
-        let mut state_results = state.watch_later_results.write();
-        if page == 1 {
-            *state_results = results_for_state;
-        } else {
-            state_results.extend(results_for_state);
-        }
-    }
-
     Ok(WatchLaterResponse {
         total,
         page,
@@ -1914,8 +1875,9 @@ pub async fn set_playlist_type(
     state: tauri::State<'_, AppState>,
     playlist_type: PlaylistType,
 ) -> Result<(), String> {
-    let mut current = state.playlist_type.write();
-    *current = playlist_type;
+    // Set the browsing list (creates/updates active_playback)
+    let list_id = ListContextId::from(playlist_type);
+    state.set_browsing_list(list_id);
     Ok(())
 }
 

@@ -38,7 +38,7 @@ pub fn estimate_database_size_kb(
 
     let kb_per_video = if let (Some(size_kb), total) = (current_database_size_kb, current_total_videos) {
         if total > 0 {
-            ((size_kb + total as u64 - 1) / total as u64).max(1)
+            size_kb.div_ceil(total as u64).max(1)
         } else {
             FALLBACK_KB_PER_VIDEO
         }

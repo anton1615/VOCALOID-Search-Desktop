@@ -344,6 +344,26 @@ mod tests {
 
 ---
 
+### 為什麼移除 Legacy 狀態欄位？(2026-03-16)
+
+**問題**：`state.rs` 同時保留新舊兩套狀態模型：
+- Legacy: `playlist_type`, `search_results`, `history_results`, `watch_later_results`, `playlist_index`
+- New: `list_contexts`, `active_playback`
+
+這增加了維護複雜度與同步風險。
+
+**決策**：移除所有 legacy 欄位，統一使用 ListContext 模型：
+- `playlist_index` → `active_playback.current_index`
+- `*_results` → `list_contexts[id].items`
+- `playlist_type` → `active_playback.list_id` (透過 `set_browsing_list()`)
+
+**效益**：
+- 降低狀態同步複雜度
+- 單一真值來源
+- 更容易維護與擴展
+
+**參見**：`openspec/changes/remove-legacy-state-fields/`
+
 ### 為什麼原子更新瀏覽參數？(2026-03-13)
 
 **問題**：`reserve_list_context_version()` 只更新版本號和清除 items，但不更新 sort、filters 等瀏覽參數。這建立了不一致狀態的時間窗口。
@@ -473,11 +493,12 @@ openspec/
 
 | 日期 | 變更名稱 | 說明 |
 |------|----------|------|
+| 2026-03-16 | remove-legacy-state-fields | 移除舊版狀態欄位，統一使用 ListContext 模型 |
+| 2026-03-16 | resolve-technical-debt | 技術債削減 Phase 1：類型安全、composables、測試 |
 | 2026-03-14 | unify-player-architecture | 統一播放器架構，消除主視窗與 PiP 重複邏輯 |
 | 2026-03-13 | fix-load-more-race-condition | 修復排序/篩選切換時的 load_more 競態條件 |
 | 2026-03-12 | harden-playlist-state-management | 強化播放清單狀態管理，引入 ListContext 版本控制 |
 | 2026-03-06 | unified-rust-state | Rust 統一狀態管理，前端改為純顯示層 |
-
 ### 關鍵能力規格
 
 - `playlist-context-management` - 播放清單上下文管理與版本控制

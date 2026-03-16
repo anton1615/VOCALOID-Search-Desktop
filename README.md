@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.7 - Legacy State Fields Removal
+
+**Highlights:**
+- Removed legacy state fields (`playlist_index`, `search_results`, `history_results`, `watch_later_results`, `playlist_type`) from Rust backend
+- Unified state management now uses `ListContext` model exclusively
+- Added `set_browsing_list()` method for tracking browsing context
+- Fixed all clippy warnings for cleaner code
+
+**Technical Implementation:**
+- `playlist_index` → `active_playback.current_index`
+- `*_results` fields → `list_contexts[id].items`
+- `playlist_type` → `active_playback.list_id` (via `set_browsing_list()`)
+- Added architecture decision record in AGENTS.md
+- Synced 7 delta specs from resolve-technical-debt to main specs
+
+**Benefits:**
+- Reduced state synchronization complexity
+- Single source of truth for all list data
+- Improved maintainability and code clarity
+
+
+## Release Notes
+
 ### v1.5.6 - Technical Debt Reduction & Bug Fix
 
 **Highlights:**

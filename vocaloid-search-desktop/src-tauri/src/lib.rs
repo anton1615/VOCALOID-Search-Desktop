@@ -16,11 +16,11 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle();
             
-            let data_dir = database::get_data_dir(&app_handle);
+            let data_dir = database::get_data_dir(app_handle);
             std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
             
-            let videos_db_path = database::get_videos_db_path(&app_handle);
-            let user_data_db_path = database::get_user_data_db_path(&app_handle);
+            let videos_db_path = database::get_videos_db_path(app_handle);
+            let user_data_db_path = database::get_user_data_db_path(app_handle);
             
             // Check for migration from single data.db to split databases
             let old_db_path = data_dir.join("data.db");
@@ -34,7 +34,7 @@ pub fn run() {
             let state = state::AppState::new(videos_db_path, user_data_db_path);
             app.manage(state);
             
-            let window_state = database::load_window_state(&app_handle);
+            let window_state = database::load_window_state(app_handle);
             
             #[cfg(target_os = "windows")]
             {

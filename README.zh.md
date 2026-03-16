@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.7 - 移除舊版狀態欄位
+
+**主要變更:**
+- 從 Rust 後端移除舊版狀態欄位（`playlist_index`、`search_results`、`history_results`、`watch_later_results`、`playlist_type`）
+- 狀態管理現已統一使用 `ListContext` 模型
+- 新增 `set_browsing_list()` 方法用於追蹤瀏覽上下文
+- 修正所有 clippy 警告，程式碼更整潔
+
+**技術實作:**
+- `playlist_index` → `active_playback.current_index`
+- `*_results` 欄位 → `list_contexts[id].items`
+- `playlist_type` → `active_playback.list_id`（透過 `set_browsing_list()`）
+- 在 AGENTS.md 新增架構決策記錄
+- 將 7 個 delta specs 從 resolve-technical-debt 同步至主 specs
+
+**效益:**
+- 降低狀態同步複雜度
+- 所有列表資料的單一真實來源
+- 提升可維護性與程式碼清晰度
+
+
+## 版本更新說明
+
 ### v1.5.6 - 技術債削減與錯誤修復
 
 **主要變更:**

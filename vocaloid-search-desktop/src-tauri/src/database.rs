@@ -144,16 +144,16 @@ pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), ru
     // Initialize videos.db
     let videos_conn = Connection::open(videos_path)?;
     videos_conn.execute_batch(VIDEOS_SCHEMA)?;
-    videos_conn.pragma_update(None, "journal_mode", &"WAL")?;
-    videos_conn.pragma_update(None, "synchronous", &"NORMAL")?;
-    videos_conn.pragma_update(None, "cache_size", &-64000)?;
+    videos_conn.pragma_update(None, "journal_mode", "WAL")?;
+    videos_conn.pragma_update(None, "synchronous", "NORMAL")?;
+    videos_conn.pragma_update(None, "cache_size", -64000)?;
     
     // Initialize user_data.db
     let user_data_conn = Connection::open(user_data_path)?;
     user_data_conn.execute_batch(USER_DATA_SCHEMA)?;
-    user_data_conn.pragma_update(None, "journal_mode", &"WAL")?;
-    user_data_conn.pragma_update(None, "synchronous", &"NORMAL")?;
-    user_data_conn.pragma_update(None, "cache_size", &-64000)?;
+    user_data_conn.pragma_update(None, "journal_mode", "WAL")?;
+    user_data_conn.pragma_update(None, "synchronous", "NORMAL")?;
+    user_data_conn.pragma_update(None, "cache_size", -64000)?;
     
     Ok(())
 }
@@ -183,22 +183,20 @@ impl Database {
     /// Connect to videos.db for video metadata operations
     pub fn connect_videos(&self) -> Result<Connection, rusqlite::Error> {
         let conn = Connection::open(&*self.videos_path)?;
-        conn.pragma_update(None, "journal_mode", &"WAL")?;
-        conn.pragma_update(None, "synchronous", &"NORMAL")?;
-        conn.pragma_update(None, "cache_size", &-64000)?;
-        conn.pragma_update(None, "mmap_size", &268435456)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "cache_size", -64000)?;
+        conn.pragma_update(None, "mmap_size", 268435456)?;
         Ok(conn)
     }
-
     /// Connect to user_data.db for user data operations (history, watch_later, config)
     pub fn connect_user_data(&self) -> Result<Connection, rusqlite::Error> {
         let conn = Connection::open(&*self.user_data_path)?;
-        conn.pragma_update(None, "journal_mode", &"WAL")?;
-        conn.pragma_update(None, "synchronous", &"NORMAL")?;
-        conn.pragma_update(None, "cache_size", &-64000)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "cache_size", -64000)?;
         Ok(conn)
     }
-
     /// Legacy connect method - returns videos.db connection for backward compatibility
     pub fn connect(&self) -> Result<Connection, rusqlite::Error> {
         self.connect_videos()

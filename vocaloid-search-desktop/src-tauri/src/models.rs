@@ -23,17 +23,12 @@ pub struct WatchLaterEntry {
     pub added_at: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum PlaylistType {
+    #[default]
     Search,
     History,
     WatchLater,
-}
-
-impl Default for PlaylistType {
-    fn default() -> Self {
-        PlaylistType::Search
-    }
 }
 
 /// Unique identifier for a list context.
@@ -185,9 +180,10 @@ fn default_weight() -> f64 {
     1.0
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SortField {
+    #[default]
     View,
     Mylist,
     Comment,
@@ -198,23 +194,12 @@ pub enum SortField {
     AddedAt,
 }
 
-impl Default for SortField {
-    fn default() -> Self {
-        SortField::View
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SortDirection {
     Asc,
+    #[default]
     Desc,
-}
-
-impl Default for SortDirection {
-    fn default() -> Self {
-        SortDirection::Desc
-    }
 }
 
 impl SortDirection {

@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::models::{ActivePlayback, HistoryState, ListContext, ListContextId, PlaylistType, ScraperConfig, ScraperProgress, SearchState, Video, WatchLaterState};
+use crate::models::{ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress, SearchState, Video, WatchLaterState};
 use async_channel::Sender;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -42,12 +42,6 @@ pub struct AppState {
     pub db: Database,
     pub current_video: Arc<RwLock<Option<Video>>>,
     pub pip_active: Arc<RwLock<bool>>,
-    // Legacy fields (kept for migration compatibility)
-    pub playlist_type: Arc<RwLock<PlaylistType>>,
-    pub search_results: Arc<RwLock<Vec<Video>>>,
-    pub history_results: Arc<RwLock<Vec<Video>>>,
-    pub watch_later_results: Arc<RwLock<Vec<Video>>>,
-    pub playlist_index: Arc<RwLock<Option<usize>>>,
     // New list-context model
     pub list_contexts: Arc<RwLock<HashMap<ListContextId, ListContext>>>,
     pub active_playback: Arc<RwLock<Option<ActivePlayback>>>,
@@ -69,11 +63,6 @@ impl AppState {
             db: Database::new(videos_path, user_data_path),
             current_video: Arc::new(RwLock::new(None)),
             pip_active: Arc::new(RwLock::new(false)),
-            playlist_type: Arc::new(RwLock::new(PlaylistType::default())),
-            search_results: Arc::new(RwLock::new(Vec::new())),
-            history_results: Arc::new(RwLock::new(Vec::new())),
-            watch_later_results: Arc::new(RwLock::new(Vec::new())),
-            playlist_index: Arc::new(RwLock::new(None)),
             list_contexts: Arc::new(RwLock::new(HashMap::new())),
             active_playback: Arc::new(RwLock::new(None)),
             auto_play: Arc::new(RwLock::new(true)),
@@ -309,6 +298,40 @@ impl AppState {
     pub fn get_list_context_items(&self, list_id: &ListContextId) -> Vec<Video> {
         let contexts = self.list_contexts.read();
         contexts.get(list_id).map(|c| c.items.clone()).unwrap_or_default()
+    }
+
+    /// Update a single video in a list context
+    /// Returns true if successful, false if index out of bounds or context not found
+    pub fn update_list_context_item(&self, list_id: &ListContextId, index: usize, video: Video) -> bool {
+        let mut contexts = self.list_contexts.write();
+        if let Some(context) = contexts.get_mut(list_id) {
+            if index < context.items.len() {
+                context.items[index] = video;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Set the browsing list (used by set_playlist_type)
+    /// This sets active_playback with is_playing=false if no active playback exists
+    /// If there's already active playback, this updates the list_id but preserves the index and is_playing
+    pub fn set_browsing_list(&self, list_id: ListContextId) {
+        let list_version = self.get_list_context_version(&list_id);
+        let mut playback = self.active_playback.write();
+        if let Some(ref mut p) = *playback {
+            // Update the list_id but preserve index and is_playing
+            p.list_id = list_id;
+            p.list_version = list_version;
+        } else {
+            // Create new active_playback with is_playing=false
+            *playback = Some(ActivePlayback {
+                list_id,
+                list_version,
+                current_index: 0,
+                is_playing: false,
+            });
+        }
     }
 }
 
