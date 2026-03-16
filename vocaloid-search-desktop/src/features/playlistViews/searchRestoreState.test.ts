@@ -28,6 +28,7 @@ const baseSearchState: SearchState = {
   has_next: false,
   total_count: 0,
   version: 0,
+  loading: false,
 }
 
 const emptyPlaylistState: PlaylistState = {

@@ -198,6 +198,7 @@ export interface SearchState {
   total_count: number
   version: number
   results?: Video[]
+  loading: boolean
 }
 
 export interface VideoSelectedPayload {
@@ -310,6 +311,10 @@ export const api = {
 
   setSearchState: async (searchState: SearchState): Promise<void> => {
     return invoke('set_search_state', { searchState })
+  },
+
+  setSearchLoading: async (loading: boolean): Promise<void> => {
+    return invoke('set_search_loading', { loading })
   },
 
   loadMore: async (requestedPlaylistType?: PlaylistType, expectedVersion?: number): Promise<SearchResponse> => {

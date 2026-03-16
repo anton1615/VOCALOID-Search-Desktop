@@ -416,6 +416,7 @@ pub struct SearchState {
     pub total_count: usize,
     pub version: u64,
     pub results: Vec<Video>,
+    pub loading: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

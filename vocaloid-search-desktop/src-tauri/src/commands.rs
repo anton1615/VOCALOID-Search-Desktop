@@ -211,6 +211,20 @@ pub async fn set_search_state(
 }
 
 #[tauri::command]
+pub async fn set_search_loading(
+    app: AppHandle,
+    loading: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut current = state.search_state.write();
+        current.loading = loading;
+    }
+    app.emit("search-state-changed", &state.search_state.read().clone()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn load_more(
     app: AppHandle,
     requested_playlist_type: Option<PlaylistType>,

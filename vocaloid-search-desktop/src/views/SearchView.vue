@@ -121,6 +121,7 @@ function loadSearchState() {
 
 async function search() {
   loading.value = true
+  await api.setSearchLoading(true)
   page.value = 1
   results.value = []
   currentVideoIndex.value = -1
@@ -158,6 +159,7 @@ async function search() {
     console.error('Search error:', e)
   } finally {
     loading.value = false
+    await api.setSearchLoading(false)
   }
 }
 
@@ -173,10 +175,10 @@ async function loadMore() {
   
   try {
     const searchState = await api.getSearchState()
-    const response = await api.loadMore('Search', searchState.version)
+    await api.loadMore('Search', searchState.version)
     // Sync results from backend instead of appending
     const updatedState = await api.getSearchState()
-    results.value = updatedState.results
+    results.value = updatedState.results ?? []
     page.value = updatedState.page
     hasNext.value = updatedState.has_next
   } catch (e) {
