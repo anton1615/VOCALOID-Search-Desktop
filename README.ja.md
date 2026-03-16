@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.8 - Load More 競合状態の修正
+
+**主な変更点:**
+- `loadMore()` と `search()` の間の競合状態を修正（51番目の動画でプレイリストにギャップが発生する問題）
+- フロントエンドの `loadMore()` に `loading` 状態チェックを追加し、検索中の実行を防止
+- `loadMore()` はローカルで追加せず、バックエンドから結果を同期するように変更
+- バックエンドの `load_more` コマンドが `extend_list_context_items` の戻り値を検証
+
+**バグ修正:**
+- 並び替え/フィルタを素早く切り替えると、51番目以降の動画にギャップが発生
+- `search()` が結果をクリアしている間に `loadMore()` が実行され、新旧の結果が混在
+
+**技術的な実装:**
+- フロントエンド：`SearchView.vue` の `loadMore()` の先頭に `loading.value` チェックを追加
+- フロントエンド：`loadMore()` 成功後に `api.getSearchState()` を呼び出して完全な結果を同期
+- フロントエンド：PiP の `playNext()` もメインウィンドウの loading 状態をチェック
+- バックエンド：`extend_list_context_items` 失敗時（バージョン不一致）に `load_more` がエラーを返す
+- delta specs を `playlist-context-management` spec に同期
+
+**メリット:**
+- 並び替えを素早く切り替えてもプレイリストの動作が一貫
+- 50番目以降の動画でギャップが発生しない
+- PiP再生はメインウィンドウの検索操作の影響を受けない
+
+
 ### v1.5.7 - レガシー状態フィールドの削除
 
 **主な変更点:**

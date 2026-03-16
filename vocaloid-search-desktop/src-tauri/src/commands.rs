@@ -261,7 +261,10 @@ pub async fn load_more(
     let response = execute_search(&state, &request)?;
     
     // Append new items to list_context and update pagination state
-    state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
+    let extend_success = state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
+    if !extend_success {
+        return Err("Failed to extend list context: version mismatch or context not found".to_string());
+    }
     // Also sync search_state with list_context for restore compatibility
     {
         let mut ss = state.search_state.write();

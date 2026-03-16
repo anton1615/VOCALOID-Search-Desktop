@@ -78,7 +78,10 @@ async function playNext() {
       if (remaining <= 5 && hasNext.value && canPreload) {
         try {
           const searchState = await api.getSearchState()
-          if (searchState.has_next) {
+          // Check if main window is loading (search in progress)
+          if (searchState.loading) {
+            console.log('[PiP] Blocked preload: search in progress')
+          } else if (searchState.has_next) {
             console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
             await api.loadMore('Search', searchState.version)
           }
@@ -88,9 +91,13 @@ async function playNext() {
       } else if (!hasNext.value && canPreload) {
         try {
           const searchState = await api.getSearchState()
-          if (searchState.has_next) {
+          // Check if main window is loading (search in progress)
+          if (searchState.loading) {
+            console.log('[PiP] Blocked loadMore: search in progress')
+          } else if (searchState.has_next) {
             console.log('[PiP] At end, loading more...')
             await api.loadMore('Search', searchState.version)
+            // Sync results from backend
             const newPlaylistState = await api.getPlaylistState()
             if (newPlaylistState.index !== null && newPlaylistState.index + 1 < newPlaylistState.results.length) {
               hasNext.value = true

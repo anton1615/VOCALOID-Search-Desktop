@@ -162,6 +162,11 @@ async function search() {
 }
 
 async function loadMore() {
+  // Prevent loadMore during active search
+  if (loading.value) {
+    console.log('[loadMore] Blocked: search in progress')
+    return
+  }
   if (loadingMore.value || !hasNext.value) return
   
   loadingMore.value = true
@@ -169,10 +174,11 @@ async function loadMore() {
   try {
     const searchState = await api.getSearchState()
     const response = await api.loadMore('Search', searchState.version)
-    // Append new results from Rust
-    results.value = [...results.value, ...response.results]
-    page.value++
-    hasNext.value = response.has_next
+    // Sync results from backend instead of appending
+    const updatedState = await api.getSearchState()
+    results.value = updatedState.results
+    page.value = updatedState.page
+    hasNext.value = updatedState.has_next
   } catch (e) {
     console.error('Load more error:', e)
   } finally {

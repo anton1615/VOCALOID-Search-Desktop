@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.8 - 載入更多競態條件修復
+
+**重點更新:**
+- 修復 `loadMore()` 與 `search()` 之間的競態條件，該問題會導致播放清單在第 51 部影片處出現斷層
+- 前端 `loadMore()` 新增 `loading` 狀態檢查，防止在搜尋進行中時執行
+- `loadMore()` 成功後從後端同步結果，而非本地追加
+- 後端 `load_more` 命令現在會驗證 `extend_list_context_items` 返回值
+
+**錯誤修復:**
+- 快速切換排序/篩選條件時，第 51 部影片之後可能出現斷層
+- `loadMore()` 可能在 `search()` 清空結果時執行，導致新舊結果混合
+
+**技術實作:**
+- 前端：在 `SearchView.vue` 的 `loadMore()` 開頭新增 `loading.value` 檢查
+- 前端：`loadMore()` 成功後呼叫 `api.getSearchState()` 同步完整結果
+- 前端：PiP 的 `playNext()` 也會檢查主視窗 loading 狀態
+- 後端：`load_more` 在 `extend_list_context_items` 失敗時返回錯誤（版本不匹配）
+- 同步 delta specs 至 `playlist-context-management` spec
+
+**效益:**
+- 快速切換排序時播放清單行為一致
+- 第 50 部影片之後不再出現斷層
+- PiP 播放不受主視窗搜尋操作影響
+
+
 ### v1.5.7 - 移除舊版狀態欄位
 
 **主要變更:**

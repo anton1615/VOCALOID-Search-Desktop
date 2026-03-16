@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.8 - Load More Race Condition Fix
+
+**Highlights:**
+- Fixed race condition between `loadMore()` and `search()` that caused playlist gaps at video #51
+- Added `loading` state check in frontend `loadMore()` to prevent execution during active search
+- `loadMore()` now syncs results from backend instead of appending locally
+- Backend `load_more` command now validates `extend_list_context_items` return value
+
+**Bug Fix:**
+- When rapidly switching sort/filter options, the 51st video onwards could have gaps due to race condition
+- `loadMore()` could execute while `search()` was clearing results, causing mixed old/new results
+
+**Technical Implementation:**
+- Frontend: Added `loading.value` check at start of `loadMore()` in `SearchView.vue`
+- Frontend: `loadMore()` now calls `api.getSearchState()` to sync complete results after success
+- Frontend: PiP `playNext()` also checks main window loading state before loadMore
+- Backend: `load_more` returns error when `extend_list_context_items` fails (version mismatch)
+- Synced delta specs to `playlist-context-management` spec
+
+**Benefits:**
+- Consistent playlist behavior when rapidly switching sort options
+- No more gaps in playlist after video #50
+- PiP playback unaffected by main window search operations
+
+
 ### v1.5.7 - Legacy State Fields Removal
 
 **Highlights:**
