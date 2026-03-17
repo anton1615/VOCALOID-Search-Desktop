@@ -493,6 +493,7 @@ openspec/
 
 | 日期 | 變更名稱 | 說明 |
 |------|----------|------|
+| 2026-03-17 | fix-search-pagination-stability | 修復搜尋分頁排序穩定性，加入 ORDER BY tie-breaker |
 | 2026-03-16 | fix-load-more-frontend-race-condition | 修復前端 loadMore 競態條件，增加 loading 檢查與後端同步 |
 | 2026-03-16 | remove-legacy-state-fields | 移除舊版狀態欄位，統一使用 ListContext 模型 |
 | 2026-03-16 | resolve-technical-debt | 技術債削減 Phase 1：類型安全、composables、測試 |

@@ -191,6 +191,7 @@ pub async fn get_search_state(
         search_state.has_next = list_context.has_next;
         search_state.total_count = list_context.total_count;
         search_state.sort = list_context.sort.clone();
+        search_state.results = list_context.items.clone();
     }
     Ok(search_state)
 }
@@ -407,9 +408,9 @@ fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (Strin
             SortDirection::Asc => "ASC",
             SortDirection::Desc => "DESC",
         };
-        format!(" ORDER BY {} {}", field, direction)
+        format!(" ORDER BY {} {}, v.id {}", field, direction, direction)
     } else {
-        " ORDER BY v.view_count DESC".to_string()
+        " ORDER BY v.view_count DESC, v.id DESC".to_string()
     };
     
     sql.push_str(&order_by);
@@ -470,7 +471,6 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     }
     
     if request.exclude_watched {
-        // Get watched video IDs from user_data.db (history table is now separate)
         let watched_ids = state.db.get_all_watched_video_ids().unwrap_or_default();
         if !watched_ids.is_empty() {
             let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
@@ -516,10 +516,10 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
             SortDirection::Asc => "ASC",
             SortDirection::Desc => "DESC",
         };
-        format!(" ORDER BY {} {}", field, direction)
+        format!(" ORDER BY {} {}, v.id {}", field, direction, direction)
     } else {
-        " ORDER BY v.view_count DESC".to_string()
-    };
+        " ORDER BY v.view_count DESC, v.id DESC".to_string()
+};
     
     sql.push_str(&order_by);
     sql.push_str(&format!(" LIMIT {} OFFSET {}", request.page_size, (request.page - 1) * request.page_size));
@@ -715,9 +715,9 @@ pub async fn search(
             SortDirection::Asc => "ASC",
             SortDirection::Desc => "DESC",
         };
-        format!(" ORDER BY {} {}", field, direction)
+        format!(" ORDER BY {} {}, v.id {}", field, direction, direction)
     } else {
-        " ORDER BY v.view_count DESC".to_string()
+        " ORDER BY v.view_count DESC, v.id DESC".to_string()
     };
     
     sql.push_str(&order_by);
@@ -2255,5 +2255,76 @@ mod tests {
         
         assert!(sql.contains("v.id NOT IN"));
         assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn build_query_with_stable_tie_breaker_for_like_sort() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(SortConfig {
+                by: SortField::Like,
+                direction: SortDirection::Desc,
+                weights: None,
+            }),
+            formula_filter: None,
+        };
+        
+        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("ORDER BY v.like_count DESC, v.id DESC"), 
+            "ORDER BY should include deterministic tie-breaker: {}", sql);
+    }
+
+    #[test]
+    fn build_query_with_stable_tie_breaker_for_view_sort_asc() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(SortConfig {
+                by: SortField::View,
+                direction: SortDirection::Asc,
+                weights: None,
+            }),
+            formula_filter: None,
+        };
+        
+        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("ORDER BY v.view_count ASC, v.id ASC"), 
+            "ORDER BY should include deterministic tie-breaker with same direction: {}", sql);
+    }
+
+    #[test]
+    fn build_query_with_stable_tie_breaker_for_custom_sort() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(SortConfig {
+                by: SortField::Custom,
+                direction: SortDirection::Desc,
+                weights: Some(SortWeights {
+                    view: 5.0,
+                    mylist: 3.0,
+                    comment: 2.0,
+                    like: 1.0,
+                }),
+            }),
+            formula_filter: None,
+        };
+        
+        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("v.id DESC"), 
+            "ORDER BY for custom sort should include v.id DESC tie-breaker: {}", sql);
     }
 }

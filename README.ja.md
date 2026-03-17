@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.9 - 検索ページネーション安定性
+
+**主な変更点:**
+- 同じ値が多いフィールド（例：いいね数）でのページネーションずれを修正
+- SQL ORDER BY に決定論的 tie-breaker（`v.id`）を追加し、ページネーションを安定化
+- `get_search_state()` が権威ある list context から同期された `results` を返すように修正
+
+**バグ修正:**
+- いいね数/再生回数で並び替えると、同じ値の動画がページ間でずれる可能性があった
+- ページ境界（例：50番目 → 51番目の動画）で予期しないギャップや重複が発生
+- `get_search_state()` が実際の list context と一致しない古い `results` を返す可能性
+
+**技術的な実装:**
+- バックエンド：すべての検索 ORDER BY 句に `, v.id <dir>` tie-breaker を追加
+- バックエンド：`build_search_query()` と `execute_search()` が同じ安定した並び順を使用
+- バックエンド：`get_search_state()` が `list_context.items` から `results` を同期
+- tie-breaker 動作を検証する3つのユニットテストを追加
+- delta specs を `video-search` spec に同期
+
+**メリット:**
+- ページ境界で一貫したプレイリストの並び順
+- さらに読み込む際に予期しないギャップが発生しない
+- PiP 再生がページ境界を越えても安定
+
+
 ### v1.5.8 - Load More 競合状態の修正
 
 **主な変更点:**

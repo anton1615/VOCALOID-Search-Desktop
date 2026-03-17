@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.9 - Search Pagination Stability
+
+**Highlights:**
+- Fixed pagination drift when sorting by fields with many ties (e.g., Like count)
+- Added deterministic tie-breaker (`v.id`) to SQL ORDER BY for stable pagination
+- `get_search_state()` now returns `results` synced from authoritative list context
+
+**Bug Fix:**
+- When sorting by Like/View count, videos with same values could drift between pages
+- Page boundaries (e.g., video #50 → #51) could have unexpected gaps or duplicates
+- `get_search_state()` could return stale `results` not reflecting actual list context
+
+**Technical Implementation:**
+- Backend: Added `, v.id <dir>` tie-breaker to all search ORDER BY clauses
+- Backend: `build_search_query()` and `execute_search()` now use same stable ordering
+- Backend: `get_search_state()` syncs `results` from `list_context.items`
+- Added 3 unit tests verifying tie-breaker behavior
+- Synced delta specs to `video-search` spec
+
+**Benefits:**
+- Consistent playlist ordering across pagination boundaries
+- No more unexpected gaps when loading more results
+- PiP playback remains stable across page boundaries
+
+
 ### v1.5.8 - Load More Race Condition Fix
 
 **Highlights:**

@@ -247,6 +247,31 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.9 - 搜尋分頁排序穩定性
+
+**重點更新:**
+- 修復排序欄位有大量相同值時（例如按讚數）的分頁漂移問題
+- SQL ORDER BY 新增決定性 tie-breaker（`v.id`）確保分頁穩定
+- `get_search_state()` 現在返回從權威 list context 同步的 `results`
+
+**錯誤修復:**
+- 按讚數/觀看次數排序時，相同值的影片可能在頁面間漂移
+- 分頁邊界（例如第 50 → 51 部影片）可能出現非預期的斷層或重複
+- `get_search_state()` 可能返回與實際 list context 不一致的過時 `results`
+
+**技術實作:**
+- 後端：所有搜尋 ORDER BY 子句新增 `, v.id <dir>` tie-breaker
+- 後端：`build_search_query()` 與 `execute_search()` 使用相同的穩定排序
+- 後端：`get_search_state()` 從 `list_context.items` 同步 `results`
+- 新增 3 個單元測試驗證 tie-breaker 行為
+- 同步 delta specs 至 `video-search` spec
+
+**效益:**
+- 分頁邊界排序一致
+- 載入更多結果時不再出現非預期斷層
+- PiP 播放跨分頁邊界時保持穩定
+
+
 ### v1.5.8 - 載入更多競態條件修復
 
 **重點更新:**
