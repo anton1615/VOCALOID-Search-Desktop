@@ -1,5 +1,5 @@
 use crate::database::Database;
-use crate::models::{ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress, SearchState, Video, WatchLaterState};
+use crate::models::{ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress, SearchPlaybackSnapshot, SearchState, Video, WatchLaterState};
 use async_channel::Sender;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -45,6 +45,9 @@ pub struct AppState {
     // New list-context model
     pub list_contexts: Arc<RwLock<HashMap<ListContextId, ListContext>>>,
     pub active_playback: Arc<RwLock<Option<ActivePlayback>>>,
+    /// Search playback snapshot for frozen watched boundary
+    /// Only valid when active_playback.list_id == ListContextId::Search
+    pub search_playback_snapshot: Arc<RwLock<Option<SearchPlaybackSnapshot>>>,
     // Other state
     pub auto_play: Arc<RwLock<bool>>,
     pub auto_skip: Arc<RwLock<bool>>,
@@ -65,6 +68,7 @@ impl AppState {
             pip_active: Arc::new(RwLock::new(false)),
             list_contexts: Arc::new(RwLock::new(HashMap::new())),
             active_playback: Arc::new(RwLock::new(None)),
+            search_playback_snapshot: Arc::new(RwLock::new(None)),
             auto_play: Arc::new(RwLock::new(true)),
             auto_skip: Arc::new(RwLock::new(false)),
             skip_threshold: Arc::new(RwLock::new(30)),
@@ -166,6 +170,9 @@ impl AppState {
     pub fn clear_active_playback(&self) {
         let mut playback = self.active_playback.write();
         *playback = None;
+        // Also clear Search playback snapshot when playback is cleared
+        let mut snapshot = self.search_playback_snapshot.write();
+        *snapshot = None;
     }
 
     /// Clear active playback if it belongs to the specified list
@@ -174,8 +181,52 @@ impl AppState {
         if let Some(ref p) = *playback {
             if &p.list_id == list_id {
                 *playback = None;
+                // Also clear Search playback snapshot if clearing Search playback
+                if *list_id == ListContextId::Search {
+                    let mut snapshot = self.search_playback_snapshot.write();
+                    *snapshot = None;
+                }
             }
         }
+    }
+
+    /// Create or reuse Search playback snapshot for the current Search session
+    /// Returns true if a new snapshot was created, false if reusing existing
+    pub fn create_or_reuse_search_playback_snapshot(
+        &self,
+        list_version: u64,
+        max_watched_seq: i64,
+    ) -> bool {
+        let mut snapshot = self.search_playback_snapshot.write();
+        match *snapshot {
+            Some(ref existing) if existing.list_version == list_version => {
+                // Reuse existing snapshot for same version
+                false
+            }
+            _ => {
+                // Create new snapshot
+                *snapshot = Some(SearchPlaybackSnapshot {
+                    list_version,
+                    frozen_watched_boundary_seq: max_watched_seq,
+                });
+                true
+            }
+        }
+    }
+
+    /// Get the current Search playback snapshot if valid for the given version
+    pub fn get_search_playback_snapshot(&self, list_version: u64) -> Option<SearchPlaybackSnapshot> {
+        let snapshot = self.search_playback_snapshot.read();
+        match *snapshot {
+            Some(ref s) if s.list_version == list_version => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    /// Invalidate the Search playback snapshot (called when Search conditions change)
+    pub fn invalidate_search_playback_snapshot(&self) {
+        let mut snapshot = self.search_playback_snapshot.write();
+        *snapshot = None;
     }
     /// Update list context pagination state after load_more
     /// This only updates page and has_next, does not modify items or version
@@ -393,5 +444,170 @@ mod tests {
             crate::models::PlaylistType::Search,
             crate::models::PlaylistType::History,
         ));
+    }
+
+    // Search playback snapshot tests
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestAppState {
+        state: AppState,
+        _root: std::path::PathBuf,
+    }
+
+    impl TestAppState {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("snapshot-test-{}", unique));
+            std::fs::create_dir_all(&root).unwrap();
+            let videos_path = root.join("videos.db");
+            let user_data_path = root.join("user_data.db");
+            crate::database::init_db(&videos_path, &user_data_path).unwrap();
+            let state = AppState::new(videos_path, user_data_path);
+            Self {
+                state,
+                _root: root,
+            }
+        }
+    }
+
+    impl Drop for TestAppState {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self._root);
+        }
+    }
+
+    #[test]
+    fn creates_new_search_playback_snapshot_on_first_playback() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![],
+            1,
+            50,
+            false,
+            0,
+            String::new(),
+            None,
+            None,
+            true,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+
+        let created = test.state.create_or_reuse_search_playback_snapshot(version, 42);
+        assert!(created, "should return true when creating new snapshot");
+
+        let snapshot = test.state.get_search_playback_snapshot(version);
+        assert!(snapshot.is_some(), "snapshot should exist for matching version");
+        let s = snapshot.unwrap();
+        assert_eq!(s.frozen_watched_boundary_seq, 42);
+        assert_eq!(s.list_version, version);
+    }
+
+    #[test]
+    fn reuses_existing_snapshot_for_same_search_version() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![],
+            1,
+            50,
+            false,
+            0,
+            String::new(),
+            None,
+            None,
+            true,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+
+        test.state.create_or_reuse_search_playback_snapshot(version, 10);
+        let reused = test.state.create_or_reuse_search_playback_snapshot(version, 20);
+        assert!(!reused, "should return false when reusing existing snapshot");
+
+        let snapshot = test.state.get_search_playback_snapshot(version).unwrap();
+        assert_eq!(snapshot.frozen_watched_boundary_seq, 10, "should keep original frozen boundary");
+    }
+
+    #[test]
+    fn invalidates_snapshot_when_search_conditions_change() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![],
+            1,
+            50,
+            false,
+            0,
+            String::new(),
+            None,
+            None,
+            true,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.create_or_reuse_search_playback_snapshot(version, 5);
+
+        test.state.invalidate_search_playback_snapshot();
+
+        let snapshot = test.state.get_search_playback_snapshot(version);
+        assert!(snapshot.is_none(), "snapshot should be invalidated");
+    }
+
+    #[test]
+    fn clears_snapshot_when_active_playback_is_cleared_for_search() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![],
+            1,
+            50,
+            false,
+            0,
+            String::new(),
+            None,
+            None,
+            true,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.create_or_reuse_search_playback_snapshot(version, 5);
+        test.state.set_active_playback(ListContextId::Search, version, 0);
+
+        test.state.clear_active_playback_for_list(&ListContextId::Search);
+
+        let snapshot = test.state.search_playback_snapshot.read();
+        assert!(snapshot.is_none(), "snapshot should be cleared when Search playback is cleared");
+    }
+
+    #[test]
+    fn does_not_clear_snapshot_when_clearing_other_list_playback() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![],
+            1,
+            50,
+            false,
+            0,
+            String::new(),
+            None,
+            None,
+            true,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.create_or_reuse_search_playback_snapshot(version, 5);
+        test.state.set_active_playback(ListContextId::History, 1, 0);
+
+        test.state.clear_active_playback_for_list(&ListContextId::History);
+
+        let snapshot = test.state.search_playback_snapshot.read();
+        assert!(snapshot.is_some(), "Search snapshot should remain when History playback is cleared");
     }
 }

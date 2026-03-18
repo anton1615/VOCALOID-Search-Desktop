@@ -247,6 +247,33 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.10 - Search Playback Snapshot Boundary
+
+**Highlights:**
+- Search playback now freezes watched exclusion boundary for stable membership across pagination
+- Added immutable `first_watched_seq` to history for consistent "exclude watched" behavior during playback sessions
+- Manual scroll and PiP continuous playback now use the same frozen boundary
+- History and Watch Later playback behavior unchanged - only Search uses snapshot boundary
+
+**Bug Fix:**
+- When "exclude watched" was enabled, videos watched during playback would suddenly disappear from search results at page boundaries
+- Search pagination membership was unstable because each request evaluated the latest history state
+
+**Technical Implementation:**
+- Database: Added `first_watched_seq` and `first_watched_at` columns to history with additive migration
+- Database: `mark_watched()` now preserves immutable first-watch sequence on rewatches
+- State: Added `SearchPlaybackSnapshot` metadata bound to Search list context version
+- Commands: `set_playlist_index()` creates/reuses snapshot when playing from Search
+- Commands: `execute_search()` resolves watched exclusion from frozen boundary when snapshot is active
+- Added 12 unit tests covering history boundary, snapshot lifecycle, and pagination behavior
+- Synced delta specs to `playlist-context-management`, `playlist-state-sync`, `video-search` specs
+
+**Benefits:**
+- Stable search results during playback session
+- No unexpected video disappearances when marking videos as watched
+- Consistent behavior between manual scroll and PiP playback
+
+
 ### v1.5.9 - Search Pagination Stability
 
 **Highlights:**

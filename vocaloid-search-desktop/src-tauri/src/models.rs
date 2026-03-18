@@ -447,6 +447,17 @@ impl Default for PipWindowState {
     }
 }
 
+/// Search playback snapshot metadata that binds to a specific Search session.
+/// When active, Search pagination uses the frozen watched boundary instead of live history state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchPlaybackSnapshot {
+    /// The Search list context this snapshot belongs to
+    pub list_version: u64,
+    /// Frozen watched boundary: the max first_watched_seq when playback started
+    /// Search pagination will exclude only videos with first_watched_seq <= this value
+    pub frozen_watched_boundary_seq: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[allow(non_snake_case)]
 pub struct SnapshotVideo {

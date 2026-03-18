@@ -89,7 +89,13 @@ pub async fn set_playlist_index(
 
     // Get current version from list_context
     let list_version = state.get_list_context_version(&list_id);
-    
+
+    // For Search, create or reuse the Search playback snapshot with frozen watched boundary
+    if list_id == ListContextId::Search {
+        let max_watched_seq = state.db.get_max_first_watched_seq().map_err(|e| e.to_string())?;
+        state.create_or_reuse_search_playback_snapshot(list_version, max_watched_seq);
+    }
+
     // Set active playback
     state.set_active_playback(list_id.clone(), list_version, index);
 
@@ -419,15 +425,27 @@ fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (Strin
 }
 
 fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchResponse, String> {
+    // Determine watched exclusion: use frozen boundary if Search playback snapshot is active
+    let watched_ids = if request.exclude_watched {
+        let list_version = state.get_list_context_version(&ListContextId::Search);
+        if let Some(snapshot) = state.get_search_playback_snapshot(list_version) {
+            state.db.get_watched_ids_up_to_boundary(snapshot.frozen_watched_boundary_seq).unwrap_or_default()
+        } else {
+            state.db.get_all_watched_video_ids().unwrap_or_default()
+        }
+    } else {
+        vec![]
+    };
+
     let conn = state.db.connect().map_err(|e| e.to_string())?;
-    
+
     let mut sql = String::from(
         "SELECT v.id, v.title, v.thumbnail_url, v.watch_url, \
          v.view_count, v.comment_count, v.mylist_count, v.like_count, \
          v.start_time, v.tags, v.duration, v.uploader_id, v.uploader_name, v.description \
          FROM videos v"
     );
-    
+
     let mut count_sql = String::from("SELECT COUNT(*) as total FROM videos v");
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     let mut where_clauses: Vec<String> = Vec::new();
@@ -471,7 +489,8 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     }
     
     if request.exclude_watched {
-        let watched_ids = state.db.get_all_watched_video_ids().unwrap_or_default();
+        // Use frozen boundary if Search playback snapshot is active, otherwise live state
+        // The watched_ids variable is already computed above with the correct boundary
         if !watched_ids.is_empty() {
             let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
             where_clauses.push(format!("v.id NOT IN ({})", placeholders.join(", ")));
@@ -808,6 +827,8 @@ pub async fn search(
         
         // Clear active playback for Search when query changes
         state.clear_active_playback_for_list(&ListContextId::Search);
+        // Invalidate Search playback snapshot when Search conditions change
+        state.invalidate_search_playback_snapshot();
         app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
     } else {
         // Update pagination state for subsequent pages

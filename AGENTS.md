@@ -386,6 +386,27 @@ After:
 
 **參見**：`openspec/changes/archive/2026-03-13-fix-load-more-race-condition/`
 
+---
+
+### 為什麼 Search 播放需要凍結 watched 邊界？(2026-03-18)
+
+**問題**：當 `exclude watched` 啟用時，Search 分頁每次請求都會重新評估最新的 history 狀態。這導致播放 session 內的 membership 漂移，造成分頁跳號或影片突然消失。
+
+**根因**：`exclude watched` 的語意是「排除目前為止已看過的影片」，但「目前為止」在播放 session 內會隨著新標記的 watched 影片而改變。
+
+**決策**：引入 Search playback snapshot metadata：
+- 建立 immutable first-watch sequence（`first_watched_seq`）追蹤首次觀看順序
+- Search 播放開始時凍結當下的 `MAX(first_watched_seq)` 作為邊界
+- 同一 Search session 內的分頁只排除凍結邊界內的 watched 影片
+- 新標記的 watched 影片只更新 UI badge，不改變分頁 membership
+
+**效益**：
+- Search 播放 session 內的 membership 維持穩定
+- 手動捲動與 PiP 連播行為一致
+- History 與 Watch Later 不受影響（不使用 snapshot boundary）
+
+**參見**：`openspec/changes/archive/2026-03-18-stabilize-search-playback-snapshot/`
+
 ## OpenSpec 規格驅動開發
 
 本專案使用 OpenSpec 進行規格驅動開發，所有功能變更都應遵循 OpenSpec 工作流程。
@@ -493,6 +514,7 @@ openspec/
 
 | 日期 | 變更名稱 | 說明 |
 |------|----------|------|
+| 2026-03-18 | stabilize-search-playback-snapshot | Search 播放 session 凍結 watched 邊界，確保分頁 membership 穩定 |
 | 2026-03-17 | fix-search-pagination-stability | 修復搜尋分頁排序穩定性，加入 ORDER BY tie-breaker |
 | 2026-03-16 | fix-load-more-frontend-race-condition | 修復前端 loadMore 競態條件，增加 loading 檢查與後端同步 |
 | 2026-03-16 | remove-legacy-state-fields | 移除舊版狀態欄位，統一使用 ListContext 模型 |

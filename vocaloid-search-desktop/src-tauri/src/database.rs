@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS history (
     video_id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     thumbnail_url TEXT,
-    watched_at TEXT DEFAULT CURRENT_TIMESTAMP
+    watched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    first_watched_seq INTEGER,
+    first_watched_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS watch_later (
@@ -147,14 +149,78 @@ pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), ru
     videos_conn.pragma_update(None, "journal_mode", "WAL")?;
     videos_conn.pragma_update(None, "synchronous", "NORMAL")?;
     videos_conn.pragma_update(None, "cache_size", -64000)?;
-    
+
     // Initialize user_data.db
     let user_data_conn = Connection::open(user_data_path)?;
     user_data_conn.execute_batch(USER_DATA_SCHEMA)?;
+    migrate_user_data_schema(&user_data_conn)?;
     user_data_conn.pragma_update(None, "journal_mode", "WAL")?;
     user_data_conn.pragma_update(None, "synchronous", "NORMAL")?;
     user_data_conn.pragma_update(None, "cache_size", -64000)?;
-    
+
+    Ok(())
+}
+
+fn migrate_user_data_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    add_history_column_if_missing(conn, "first_watched_seq", "INTEGER")?;
+    add_history_column_if_missing(conn, "first_watched_at", "TEXT")?;
+    backfill_history_first_watch_metadata(conn)?;
+    Ok(())
+}
+
+fn add_history_column_if_missing(
+    conn: &Connection,
+    column_name: &str,
+    column_definition: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info(history)")?;
+    let existing_columns: Vec<String> = stmt
+        .query_map([], |row| row.get(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if existing_columns.iter().any(|existing| existing == column_name) {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE history ADD COLUMN {} {}", column_name, column_definition),
+        [],
+    )?;
+    Ok(())
+}
+
+fn backfill_history_first_watch_metadata(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
+        "UPDATE history SET first_watched_at = watched_at WHERE first_watched_at IS NULL",
+        [],
+    )?;
+
+    let max_seq: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(first_watched_seq), 0) FROM history",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let mut next_seq = max_seq;
+    let mut stmt = tx.prepare(
+        "SELECT video_id FROM history WHERE first_watched_seq IS NULL ORDER BY first_watched_at ASC, watched_at ASC, video_id ASC",
+    )?;
+    let pending_ids: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    for video_id in pending_ids {
+        next_seq += 1;
+        tx.execute(
+            "UPDATE history SET first_watched_seq = ? WHERE video_id = ?",
+            params![next_seq, video_id],
+        )?;
+    }
+
+    tx.commit()?;
     Ok(())
 }
 
@@ -235,15 +301,44 @@ impl Database {
         Ok(ids)
     }
 
+    /// Get all watched video IDs with first_watched_seq <= boundary_seq
+    /// Used for frozen watched boundary in Search playback
+    pub fn get_watched_ids_up_to_boundary(&self, boundary_seq: i64) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        migrate_user_data_schema(&conn)?;
+        let mut stmt = conn.prepare(
+            "SELECT video_id FROM history WHERE first_watched_seq <= ?"
+        )?;
+        let ids: Vec<String> = stmt
+            .query_map([boundary_seq], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
+    }
+
+    /// Get the maximum first_watched_seq from history
+    /// Used to determine the frozen boundary when creating Search playback snapshot
+    pub fn get_max_first_watched_seq(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        migrate_user_data_schema(&conn)?;
+        let max_seq: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(first_watched_seq), 0) FROM history",
+                [],
+                |row| row.get(0),
+            )?;
+        Ok(max_seq)
+    }
+
     pub fn mark_watched(
         &self,
         video_id: &str,
         title: &str,
         thumbnail_url: Option<&str>,
     ) -> Result<(), rusqlite::Error> {
-        let user_conn = self.connect_user_data()?;
+        let mut user_conn = self.connect_user_data()?;
+        migrate_user_data_schema(&user_conn)?;
         let videos_conn = self.connect_videos()?;
-        
+
         let is_bad_title = title.trim().is_empty() || title == "ニコニコ動画";
         let existing: Option<(String, Option<String>)> = user_conn
             .query_row(
@@ -259,7 +354,7 @@ impl Database {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
-        
+
         let final_title = if !is_bad_title {
             title.to_string()
         } else if let Some((db_title, _)) = &from_videos {
@@ -269,16 +364,47 @@ impl Database {
         } else {
             title.to_string()
         };
-        
+
         let final_thumbnail = thumbnail_url
             .map(|s| s.to_string())
             .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()))
             .or_else(|| existing.as_ref().and_then(|(_, thumb)| thumb.clone()));
-        
-        user_conn.execute(
-            "INSERT OR REPLACE INTO history (video_id, title, thumbnail_url, watched_at) VALUES (?, ?, ?, datetime('now', '+9 hours'))",
-            params![video_id, final_title, final_thumbnail],
+
+        let tx = user_conn.transaction()?;
+        let current_seq: Option<i64> = tx
+            .query_row(
+                "SELECT first_watched_seq FROM history WHERE video_id = ?",
+                [video_id],
+                |row| row.get(0),
+            )
+            .ok();
+        let first_watched_seq = match current_seq {
+            Some(seq) => seq,
+            None => tx.query_row(
+                "SELECT COALESCE(MAX(first_watched_seq), 0) + 1 FROM history",
+                [],
+                |row| row.get(0),
+            )?,
+        };
+
+        tx.execute(
+            "INSERT INTO history (
+                video_id,
+                title,
+                thumbnail_url,
+                watched_at,
+                first_watched_seq,
+                first_watched_at
+            ) VALUES (?, ?, ?, datetime('now', '+9 hours'), ?, datetime('now', '+9 hours'))
+            ON CONFLICT(video_id) DO UPDATE SET
+                title = excluded.title,
+                thumbnail_url = excluded.thumbnail_url,
+                watched_at = excluded.watched_at,
+                first_watched_seq = history.first_watched_seq,
+                first_watched_at = history.first_watched_at",
+            params![video_id, final_title, final_thumbnail, first_watched_seq],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -604,4 +730,176 @@ pub fn load_pip_window_state(app: &tauri::AppHandle) -> Option<crate::models::Pi
     let mut contents = String::new();
     file.read_to_string(&mut contents).ok()?;
     serde_json::from_str(&contents).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDbPaths {
+        root: PathBuf,
+        videos: PathBuf,
+        user_data: PathBuf,
+    }
+
+    impl TestDbPaths {
+        fn new(prefix: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("{}-{}", prefix, unique));
+            fs::create_dir_all(&root).unwrap();
+            let videos = root.join("videos.db");
+            let user_data = root.join("user_data.db");
+            Self {
+                root,
+                videos,
+                user_data,
+            }
+        }
+
+        fn database(&self) -> Database {
+            Database::new(self.videos.clone(), self.user_data.clone())
+        }
+    }
+
+    impl Drop for TestDbPaths {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn history_schema_adds_immutable_first_watch_columns() {
+        let paths = TestDbPaths::new("history-schema-columns");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.user_data).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(history)").unwrap();
+        let column_names: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(
+            column_names.contains(&"first_watched_seq".to_string()),
+            "history table should include immutable first_watched_seq column: {:?}",
+            column_names
+        );
+        assert!(
+            column_names.contains(&"first_watched_at".to_string()),
+            "history table should include immutable first_watched_at column: {:?}",
+            column_names
+        );
+    }
+
+    #[test]
+    fn init_db_backfills_missing_first_watch_sequence_for_existing_history_rows() {
+        let paths = TestDbPaths::new("history-backfill");
+
+        let videos_conn = Connection::open(&paths.videos).unwrap();
+        videos_conn.execute_batch(VIDEOS_SCHEMA).unwrap();
+
+        let user_conn = Connection::open(&paths.user_data).unwrap();
+        user_conn
+            .execute_batch(
+                r#"
+                CREATE TABLE history (
+                    video_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    thumbnail_url TEXT,
+                    watched_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE watch_later (
+                    video_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    thumbnail_url TEXT,
+                    added_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+                "#,
+            )
+            .unwrap();
+        user_conn
+            .execute(
+                "INSERT INTO history (video_id, title, thumbnail_url, watched_at) VALUES (?, ?, ?, ?)",
+                params!["sm1", "First", Option::<String>::None, "2026-03-01 00:00:00"],
+            )
+            .unwrap();
+        user_conn
+            .execute(
+                "INSERT INTO history (video_id, title, thumbnail_url, watched_at) VALUES (?, ?, ?, ?)",
+                params!["sm2", "Second", Option::<String>::None, "2026-03-02 00:00:00"],
+            )
+            .unwrap();
+        drop(user_conn);
+
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.user_data).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT video_id, first_watched_seq, first_watched_at FROM history ORDER BY watched_at ASC, video_id ASC",
+            )
+            .unwrap();
+        let rows: Vec<(String, i64, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], ("sm1".to_string(), 1, "2026-03-01 00:00:00".to_string()));
+        assert_eq!(rows[1], ("sm2".to_string(), 2, "2026-03-02 00:00:00".to_string()));
+    }
+
+    #[test]
+    fn rewatch_keeps_immutable_first_watch_sequence_while_refreshing_mutable_fields() {
+        let paths = TestDbPaths::new("history-rewatch");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+        let db = paths.database();
+
+        db.mark_watched("sm9", "Original Title", Some("https://thumb/1"))
+            .unwrap();
+
+        let conn = db.connect_user_data().unwrap();
+        let first_state: (i64, String) = conn
+            .query_row(
+                "SELECT first_watched_seq, watched_at FROM history WHERE video_id = ?",
+                ["sm9"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        conn.execute(
+            "UPDATE history SET watched_at = ? WHERE video_id = ?",
+            params!["2000-01-01 00:00:00", "sm9"],
+        )
+        .unwrap();
+        drop(conn);
+
+        db.mark_watched("sm9", "Updated Title", None).unwrap();
+
+        let conn = db.connect_user_data().unwrap();
+        let second_state: (String, Option<String>, String, i64, String) = conn
+            .query_row(
+                "SELECT title, thumbnail_url, watched_at, first_watched_seq, first_watched_at FROM history WHERE video_id = ?",
+                ["sm9"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+
+        assert_eq!(second_state.0, "Updated Title");
+        assert_eq!(second_state.1, Some("https://thumb/1".to_string()));
+        assert_ne!(second_state.2, "2000-01-01 00:00:00");
+        assert_eq!(second_state.3, first_state.0);
+        assert_eq!(second_state.4, first_state.1);
+    }
 }
