@@ -39,6 +39,25 @@ export interface WatchLaterEntry {
 }
 
 export type PlaylistType = 'Search' | 'History' | 'WatchLater'
+export type ListContextId = PlaylistType | { Custom: string }
+
+export interface PlaybackIdentity {
+  playlistType: PlaylistType
+  playlistVersion: number
+}
+
+export interface PlaybackIdentityState extends PlaybackIdentity {
+  currentVideo: Video | null
+  currentVideoIndex: number
+  resultsCount: number
+  hasNext: boolean
+  pipActive?: boolean
+}
+
+export interface PlaybackIdentityPayload extends PlaybackIdentity {
+  currentIndex: number
+  videoId: string | null
+}
 
 export interface NumericFilter {
   gte?: number
@@ -205,6 +224,14 @@ export interface VideoSelectedPayload {
   video: Video
   index: number
   has_next: boolean
+  playlist_type: PlaylistType
+  playlist_version: number
+}
+
+export interface PlaybackVideoUpdatedPayload {
+  list_id: ListContextId
+  video: Video
+  index: number
   playlist_type: PlaylistType
   playlist_version: number
 }

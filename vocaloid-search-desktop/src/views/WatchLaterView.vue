@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
+import { api, type Video, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
 import { formatDateTime } from '../utils/dateTime'
 import { mapWatchLaterEntryToVideo } from '../utils/playlistPlaceholders'
-import { createHydratedCurrentVideo, getInitialPlaylistViewState, scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
+import { getInitialPlaylistViewState, scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
 import { createPagedPlaylistController } from '../features/playlistViews/pagedPlaylistController'
 
 const { t } = useI18n()
-
-const userInfoCache = reactive(new Map<string, UserInfo>())
 
 const results = ref<Video[]>([])
 const totalCount = ref(0)
@@ -102,55 +100,9 @@ async function loadMore() {
   }
 }
 
-async function hydrateCurrentVideo(video: Video, index: number) {
-  currentVideoIndex.value = index
-  console.log('[WatchLaterView] hydrateCurrentVideo start:', {
-    id: video.id,
-    index,
-    baseTitle: video.title,
-    baseStartTime: video.start_time,
-    baseUploaderId: video.uploader_id,
-    baseUploaderName: video.uploader_name,
-    baseViews: video.view_count,
-    baseTags: video.tags?.length ?? 0,
-    hasBaseDescription: !!video.description,
-  })
-  
-  try {
-    const fullInfo = await api.fetchFullVideoInfo(video.id)
-    console.log('[WatchLaterView] hydrateCurrentVideo fullInfo:', {
-      id: fullInfo.id,
-      title: fullInfo.title,
-      startTime: fullInfo.start_time,
-      uploaderId: fullInfo.uploader_id,
-      uploaderName: fullInfo.uploader_name,
-      views: fullInfo.view_count,
-      tags: fullInfo.tags?.length ?? 0,
-      hasDescription: !!fullInfo.description,
-    })
-    
-    currentVideo.value = fullInfo
-    results.value[index] = fullInfo
-    await api.updatePlaylistVideo(index, fullInfo)
-    if (fullInfo.uploader_id) {
-      const userInfo = await api.getUserInfo(fullInfo.id)
-      if (userInfo) {
-        userInfoCache.set(fullInfo.id, userInfo)
-      }
-    }
-    return
-  } catch (e) {
-    console.error('Failed to fetch video info:', e)
-  }
-  
-  currentVideo.value = createHydratedCurrentVideo(video, null)
-}
-
-async function playVideo(video: Video, index: number) {
-  currentVideoIndex.value = index
+async function playVideo(_video: Video, index: number) {
   await api.setPlaylistType('WatchLater')
   await api.setPlaylistIndex(index)
-  await hydrateCurrentVideo(video, index)
 }
 
 async function removeFromList(videoId: string) {
@@ -213,7 +165,8 @@ onMounted(async () => {
     })
 
     if (initialViewState.selectedVideo && initialViewState.selectedIndex >= 0) {
-      await hydrateCurrentVideo(initialViewState.selectedVideo, initialViewState.selectedIndex)
+      currentVideo.value = initialViewState.selectedVideo
+      currentVideoIndex.value = initialViewState.selectedIndex
     }
 
     // Scroll to the currently playing video after state restoration
@@ -239,9 +192,7 @@ onMounted(async () => {
       return
     }
     currentVideoIndex.value = payload.index
-    
-    const baseVideo = results.value[payload.index] ?? payload.video
-    await hydrateCurrentVideo(baseVideo, payload.index)
+    currentVideo.value = payload.video
     
     // Scroll logic: keep videos visible above and below
     const videoElement = document.getElementById('video-' + payload.index)

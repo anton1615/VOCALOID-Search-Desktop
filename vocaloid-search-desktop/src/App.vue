@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 
-import { api, type Video } from './api/tauri-commands'
+import { api, type PlaylistType, type Video } from './api/tauri-commands'
 import PlayerColumn from './components/PlayerColumn.vue'
 import { useAuthoritativePlaybackSync } from './composables/useAuthoritativePlaybackSync'
 import { i18n } from './i18n'
@@ -26,6 +26,8 @@ const currentVideoIndex = ref(-1)
 const resultsCount = ref(0)
 const hasNext = ref(false)
 const pipActive = ref(false)
+const playlistType = ref<PlaylistType>('Search')
+const playlistVersion = ref(1)
 const freshnessStatus = ref({
   message: '',
   isFresh: true,
@@ -54,18 +56,18 @@ async function syncActivePlayback(state: {
   resultsCount: number
   hasNext: boolean
   pipActive?: boolean
+  playlistType: PlaylistType
+  playlistVersion: number
 }) {
   resultsCount.value = state.resultsCount
   hasNext.value = state.hasNext
   pipActive.value = state.pipActive ?? false
+  playlistType.value = state.playlistType
+  playlistVersion.value = state.playlistVersion
 
   if (state.currentVideo) {
     currentVideoIndex.value = state.currentVideoIndex
-    try {
-      currentVideo.value = await api.fetchFullVideoInfo(state.currentVideo.id)
-    } catch {
-      currentVideo.value = state.currentVideo
-    }
+    currentVideo.value = state.currentVideo
   } else {
     currentVideoIndex.value = -1
     currentVideo.value = null
@@ -232,6 +234,8 @@ onUnmounted(() => {
             :current-video-index="currentVideoIndex"
             :results-count="resultsCount"
             :has-next="hasNext"
+            :playlist-type="playlistType"
+            :playlist-version="playlistVersion"
             :pip-active="pipActive"
             :show-auto-skip="true"
             @play-next="playNext"

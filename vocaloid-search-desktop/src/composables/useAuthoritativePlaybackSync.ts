@@ -1,4 +1,4 @@
-import { api, type Video } from '../api/tauri-commands'
+import { api, type PlaylistType, type Video } from '../api/tauri-commands'
 
 export interface AuthoritativePlaybackState {
   currentVideo: Video | null
@@ -6,6 +6,8 @@ export interface AuthoritativePlaybackState {
   resultsCount: number
   hasNext: boolean
   pipActive?: boolean
+  playlistType: PlaylistType
+  playlistVersion: number
 }
 
 export interface AuthoritativePlaybackSync {
@@ -29,6 +31,8 @@ export function useAuthoritativePlaybackSync(
       resultsCount: playlistState.results.length,
       hasNext: playlistState.has_next,
       pipActive: playlistState.pip_active,
+      playlistType: playlistState.playlist_type,
+      playlistVersion: playlistState.playlist_version,
     })
   }
 

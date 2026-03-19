@@ -225,6 +225,10 @@ mod tests {
 7. **子專案 git 狀態顯示**：從 `vocaloid-search-desktop/` 執行 `git status --short` 時，repo root 檔案會顯示成 `../<file>`（例如 `../CLAUDE.md`）
 8. **OpenSpec delta sync**：若 subagent worktree 看不到 repo root 的 `openspec/`，改在主工作區直接同步 specs，避免 worktree 路徑隔離問題
 9. **shell 小陷阱**：避免用 `printf` 輸出看起來像 option 的分隔字串，bash 可能把它當參數解析
+10. **播放 metadata staged UX**：Search / History / Watch Later 的播放區都先顯示嵌入播放器，等 Rust enrichment 完成後再一次更新 metadata；不要在前端先顯示 uploader_id 當過渡 UI
+11. **shared player metadata update 契約**：`playback-video-updated` 是獨立於 `video-selected` 的 metadata refresh；前端只在 playlist type / version / index / video id 全匹配時套用，避免重跑 selection-only side effects
+12. **shared player 驗證指令**：改動 staged metadata / player sync 後優先跑 `npx vitest run src/composables/usePlayerCore.test.ts src/composables/usePlayerEvents.test.ts src/features/playlistViews/playerColumnLayout.test.ts && npx vue-tsc --noEmit && npm run build`
+13. **OpenSpec archive 前檢查**：除 `openspec status --change "<name>" --json` 外，也要看 `openspec instructions apply --change "<name>" --json` 與 `tasks.md`；artifact 全 done 時 tasks 仍可能有未勾項目
 
 ## 常見陷阱與已知問題
 

@@ -247,6 +247,33 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.12 - 播放 metadata enrichment 集中化
+
+**重點更新:**
+- Search、History、Watch Later 的播放 metadata enrichment 現在統一由 Rust 負責
+- 播放區會先顯示嵌入播放器，等 Rust enrichment 完成後再一次更新 metadata
+- 主視窗與 PiP 現在消費同一條 authoritative playback metadata update 流程
+- Search 播放維持快速啟動，選片時不會重新打 Snapshot API
+
+**錯誤修復:**
+- Search 不再先閃出 uploader ID 再補 uploader 顯示資訊
+- 當父層 playback props 落後 shared player 本地狀態時，匹配的 metadata update 不再被漏套用
+- metadata refresh 不再重跑 shared player 裡 selection-only side effects
+
+**技術實作:**
+- 後端：新增獨立的 `playback-video-updated` 事件，payload 帶完整 playback identity 與 enriched `Video`
+- 後端：History / Watch Later 的 enrichment 改為在 Rust 端合併 Snapshot API 與 `getthumbinfo` 結果
+- 後端：Search 播放沿用既有 list context metadata，Rust enrichment 只補 uploader presentation data
+- 前端：移除 Search / History / Watch Later view 內 window-local playback hydration 與直接 playback user-info fetch
+- 前端：shared player 改以 enrichment readiness 控制 metadata 顯示，且只有 playlist type / version / index / video ID 全匹配時才套用更新
+- 新增回歸測試，覆蓋 staged metadata rendering 與 metadata update event 語意
+- 同步 delta specs 至 `video-metadata-fetch`、`user-info-fetch`、`playlist-state-sync`、`unified-player-core`
+
+**效益:**
+- Search、History、Watch Later、主視窗與 PiP 的 staged playback UX 一致
+- 降低 backend event 與 frontend refresh 時序造成的 stale metadata race
+- 播放資料補齊路徑統一，不再分散在各 view 自行抓取
+
 ### v1.5.11 - 瀏覽 / 播放邊界解耦
 
 **重點更新:**

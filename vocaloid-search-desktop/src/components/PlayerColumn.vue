@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { Video } from '../api/tauri-commands'
+import type { PlaylistType, Video } from '../api/tauri-commands'
 import UnifiedPlayer from './UnifiedPlayer.vue'
 
 defineProps<{
@@ -8,6 +8,8 @@ defineProps<{
   currentVideoIndex: number
   resultsCount: number
   hasNext: boolean
+  playlistType: PlaylistType
+  playlistVersion: number
   pipActive: boolean
   showAutoSkip?: boolean
 }>()
@@ -45,6 +47,8 @@ function handleStateCleared() {
       :current-video-index="currentVideoIndex"
       :results-count="resultsCount"
       :has-next="hasNext"
+      :playlist-type="playlistType"
+      :playlist-version="playlistVersion"
       :pip-active="pipActive"
       :show-auto-skip="showAutoSkip"
       :setup-events="true"

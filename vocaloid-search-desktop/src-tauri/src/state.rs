@@ -369,6 +369,42 @@ impl AppState {
         false
     }
 
+    pub fn matches_active_playback_metadata_update(
+        &self,
+        list_id: &ListContextId,
+        playlist_version: u64,
+        index: usize,
+        video: &Video,
+    ) -> bool {
+        let playback = self.active_playback.read();
+        let Some(active_playback) = playback.as_ref() else {
+            return false;
+        };
+
+        if &active_playback.list_id != list_id
+            || active_playback.list_version != playlist_version
+            || active_playback.current_index != index
+        {
+            return false;
+        }
+        drop(playback);
+
+        let contexts = self.list_contexts.read();
+        let Some(context) = contexts.get(list_id) else {
+            return false;
+        };
+
+        if context.version != playlist_version {
+            return false;
+        }
+
+        context
+            .items
+            .get(index)
+            .map(|current_video| current_video.id == video.id)
+            .unwrap_or(false)
+    }
+
     /// Set the currently visible browsing list without changing active playback.
     pub fn set_browsing_list(&self, list_id: ListContextId) {
         let mut browsing = self.browsing_list.write();
@@ -674,5 +710,103 @@ mod tests {
 
         let snapshot = test.state.search_playback_snapshot.read();
         assert!(snapshot.is_some(), "Search snapshot should remain when History playback is cleared");
+    }
+
+    #[test]
+    fn playback_metadata_update_matches_active_playback_identity() {
+        let test = TestAppState::new();
+        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        let video = sample_video("sm9");
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+
+        assert!(test.state.matches_active_playback_metadata_update(
+            &ListContextId::History,
+            history_version,
+            2,
+            &video,
+        ));
+    }
+
+    #[test]
+    fn playback_metadata_update_rejects_stale_identity() {
+        let test = TestAppState::new();
+        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        let video = sample_video("sm9");
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+
+        assert!(!test.state.matches_active_playback_metadata_update(
+            &ListContextId::History,
+            history_version + 1,
+            2,
+            &video,
+        ));
+        assert!(!test.state.matches_active_playback_metadata_update(
+            &ListContextId::WatchLater,
+            history_version,
+            2,
+            &video,
+        ));
+        assert!(!test.state.matches_active_playback_metadata_update(
+            &ListContextId::History,
+            history_version,
+            3,
+            &video,
+        ));
+        assert!(!test.state.matches_active_playback_metadata_update(
+            &ListContextId::History,
+            history_version,
+            2,
+            &sample_video("sm10"),
+        ));
+    }
+
+    fn sample_video(id: &str) -> Video {
+        Video {
+            id: id.to_string(),
+            title: format!("title-{id}"),
+            thumbnail_url: Some("https://example.com/thumb.jpg".to_string()),
+            watch_url: Some(format!("https://www.nicovideo.jp/watch/{id}")),
+            view_count: 1,
+            comment_count: 2,
+            mylist_count: 3,
+            like_count: 4,
+            start_time: Some("2025-01-01T00:00:00+09:00".to_string()),
+            tags: vec!["vocaloid".to_string()],
+            duration: Some(123),
+            uploader_id: Some("user-1".to_string()),
+            uploader_name: Some("miku".to_string()),
+            description: Some("desc".to_string()),
+            is_watched: false,
+        }
     }
 }

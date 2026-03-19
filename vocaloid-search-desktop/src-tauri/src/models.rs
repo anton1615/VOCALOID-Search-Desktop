@@ -429,6 +429,28 @@ pub struct VideoSelectedPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybackVideoUpdatedPayload {
+    pub list_id: ListContextId,
+    pub playlist_type: PlaylistType,
+    pub playlist_version: u64,
+    pub index: usize,
+    pub video: Video,
+}
+
+impl PlaybackVideoUpdatedPayload {
+    pub fn new(list_id: ListContextId, playlist_version: u64, index: usize, video: Video) -> Self {
+        let playlist_type = PlaylistType::from(&list_id);
+        Self {
+            list_id,
+            playlist_type,
+            playlist_version,
+            index,
+            video,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PipWindowState {
     pub x: i32,
     pub y: i32,
@@ -619,5 +641,44 @@ mod tests {
     fn invalid_sort_direction_rejected() {
         let result = serde_json::from_str::<SortDirection>("\"invalid\"");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn playback_video_updated_payload_serializes_identity_and_list_context() {
+        let payload = PlaybackVideoUpdatedPayload {
+            list_id: ListContextId::History,
+            playlist_type: PlaylistType::History,
+            playlist_version: 7,
+            index: 2,
+            video: sample_video("sm9"),
+        };
+
+        let json = serde_json::to_value(&payload).unwrap();
+
+        assert_eq!(json["list_id"], serde_json::json!("History"));
+        assert_eq!(json["playlist_type"], serde_json::json!("History"));
+        assert_eq!(json["playlist_version"], serde_json::json!(7));
+        assert_eq!(json["index"], serde_json::json!(2));
+        assert_eq!(json["video"]["id"], serde_json::json!("sm9"));
+    }
+
+    fn sample_video(id: &str) -> Video {
+        Video {
+            id: id.to_string(),
+            title: format!("title-{id}"),
+            thumbnail_url: Some("https://example.com/thumb.jpg".to_string()),
+            watch_url: Some(format!("https://www.nicovideo.jp/watch/{id}")),
+            view_count: 1,
+            comment_count: 2,
+            mylist_count: 3,
+            like_count: 4,
+            start_time: Some("2025-01-01T00:00:00+09:00".to_string()),
+            tags: vec!["vocaloid".to_string()],
+            duration: Some(123),
+            uploader_id: Some("user-1".to_string()),
+            uploader_name: Some("miku".to_string()),
+            description: Some("desc".to_string()),
+            is_watched: false,
+        }
     }
 }

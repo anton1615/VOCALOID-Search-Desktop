@@ -20,6 +20,251 @@ fn playlist_version_for_type(state: &AppState, playlist_type: PlaylistType) -> u
     }
 }
 
+fn build_playback_metadata_update_payload(
+    state: &AppState,
+    list_id: &ListContextId,
+    playlist_version: u64,
+    index: usize,
+    video: Video,
+) -> Option<PlaybackVideoUpdatedPayload> {
+    if !state.matches_active_playback_metadata_update(list_id, playlist_version, index, &video) {
+        return None;
+    }
+
+    Some(PlaybackVideoUpdatedPayload::new(
+        list_id.clone(),
+        playlist_version,
+        index,
+        video,
+    ))
+}
+
+fn apply_playback_metadata_update(
+    state: &AppState,
+    list_id: &ListContextId,
+    playlist_version: u64,
+    index: usize,
+    video: Video,
+) -> Option<PlaybackVideoUpdatedPayload> {
+    if !state.update_list_context_item(list_id, index, video.clone()) {
+        return None;
+    }
+
+    build_playback_metadata_update_payload(state, list_id, playlist_version, index, video)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlaybackEnrichmentKind {
+    FetchFullVideoInfo,
+    FetchUserInfo,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PlaybackEnrichmentRequest {
+    kind: PlaybackEnrichmentKind,
+    list_id: ListContextId,
+    playlist_version: u64,
+    index: usize,
+    video: Video,
+}
+
+fn build_playback_enrichment_request(
+    list_id: ListContextId,
+    playlist_version: u64,
+    index: usize,
+    video: Video,
+) -> PlaybackEnrichmentRequest {
+    let kind = match list_id {
+        ListContextId::Search => PlaybackEnrichmentKind::FetchUserInfo,
+        _ => PlaybackEnrichmentKind::FetchFullVideoInfo,
+    };
+
+    PlaybackEnrichmentRequest {
+        kind,
+        list_id,
+        playlist_version,
+        index,
+        video,
+    }
+}
+
+fn merge_user_info_into_video(video: Video, user_info: Option<UserInfo>) -> Video {
+    let Some(user_info) = user_info else {
+        return video;
+    };
+
+    Video {
+        uploader_id: user_info.user_id.or(video.uploader_id),
+        uploader_name: user_info.user_nickname.or(video.uploader_name),
+        ..video
+    }
+}
+
+fn resolve_playback_enrichment_video(
+    request: &PlaybackEnrichmentRequest,
+    full_video: Option<Video>,
+    user_info: Option<UserInfo>,
+) -> Video {
+    match request.kind {
+        PlaybackEnrichmentKind::FetchUserInfo => {
+            merge_user_info_into_video(request.video.clone(), user_info)
+        }
+        PlaybackEnrichmentKind::FetchFullVideoInfo => full_video.unwrap_or_else(|| request.video.clone()),
+    }
+}
+
+fn parse_duration_seconds(length: Option<&str>) -> Option<i64> {
+    let length = length?;
+    let parts: Vec<&str> = length.split(':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let mins: i64 = parts[0].parse().ok()?;
+    let secs: i64 = parts[1].parse().ok()?;
+    Some(mins * 60 + secs)
+}
+
+fn build_full_video_from_thumbinfo(
+    video_id: &str,
+    thumb_info: ThumbInfo,
+    snapshot_video: Option<SnapshotVideo>,
+) -> Video {
+    let like_count = snapshot_video
+        .and_then(|video| video.likeCounter)
+        .unwrap_or(0);
+
+    Video {
+        id: thumb_info.id,
+        title: thumb_info.title,
+        thumbnail_url: thumb_info.thumbnail_url,
+        watch_url: Some(format!("https://www.nicovideo.jp/watch/{}", video_id)),
+        view_count: thumb_info.view_counter.unwrap_or(0),
+        comment_count: thumb_info.comment_num.unwrap_or(0),
+        mylist_count: thumb_info.mylist_counter.unwrap_or(0),
+        like_count,
+        start_time: thumb_info.first_retrieve,
+        tags: thumb_info.tags.unwrap_or_default(),
+        duration: parse_duration_seconds(thumb_info.length.as_deref()),
+        uploader_id: thumb_info.user_id,
+        uploader_name: thumb_info.user_nickname,
+        description: thumb_info.description,
+        is_watched: false,
+    }
+}
+
+async fn fetch_non_search_enrichment_video<ThumbFetch, ThumbFuture, SnapshotFetch, SnapshotFuture>(
+    video_id: &str,
+    fetch_thumbinfo: ThumbFetch,
+    fetch_snapshot: SnapshotFetch,
+) -> Result<Video, String>
+where
+    ThumbFetch: FnOnce() -> ThumbFuture,
+    ThumbFuture: std::future::Future<Output = Result<ThumbInfo, String>>,
+    SnapshotFetch: FnOnce() -> SnapshotFuture,
+    SnapshotFuture: std::future::Future<Output = Option<SnapshotVideo>>,
+{
+    let (thumb_info, snapshot_video) = tokio::join!(fetch_thumbinfo(), fetch_snapshot());
+    let thumb_info = thumb_info?;
+
+    Ok(build_full_video_from_thumbinfo(
+        video_id,
+        thumb_info,
+        snapshot_video,
+    ))
+}
+
+async fn fetch_thumbinfo(client: &reqwest::Client, video_id: &str) -> Result<ThumbInfo, String> {
+    let thumb_url = format!("https://ext.nicovideo.jp/api/getthumbinfo/{}", video_id);
+    let thumb_response = client
+        .get(&thumb_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch thumbinfo: {}", e))?;
+    let thumb_xml = thumb_response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read thumbinfo response: {}", e))?;
+
+    parse_thumbinfo_xml(&thumb_xml, video_id)
+}
+
+async fn fetch_snapshot_video(client: &reqwest::Client, video_id: &str) -> Option<SnapshotVideo> {
+    #[derive(Debug, serde::Deserialize)]
+    struct SnapshotResponse {
+        data: Vec<SnapshotVideo>,
+    }
+
+    let snapshot_url = format!(
+        "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search?q={}&fields=likeCounter&targets=contentId",
+        video_id
+    );
+
+    match client.get(&snapshot_url).send().await {
+        Ok(snapshot_response) => match snapshot_response.json::<SnapshotResponse>().await {
+            Ok(snapshot_data) => snapshot_data.data.into_iter().next(),
+            Err(e) => {
+                eprintln!(
+                    "[fetch_full_video_info] Failed to parse snapshot response for {}: {}",
+                    video_id, e
+                );
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!(
+                "[fetch_full_video_info] Failed to fetch snapshot for {}: {}",
+                video_id, e
+            );
+            None
+        }
+    }
+}
+
+async fn fetch_full_video_info_with_client(
+    client: reqwest::Client,
+    video_id: String,
+) -> Result<Video, String> {
+    let thumb_client = client.clone();
+    let snapshot_client = client;
+    let thumb_video_id = video_id.clone();
+    let snapshot_video_id = video_id.clone();
+
+    fetch_non_search_enrichment_video(
+        &video_id,
+        move || async move { fetch_thumbinfo(&thumb_client, &thumb_video_id).await },
+        move || async move { fetch_snapshot_video(&snapshot_client, &snapshot_video_id).await },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn fetch_full_video_info(
+    video_id: String,
+) -> Result<Video, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("vocaloid-search-desktop/1.0")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let video = fetch_full_video_info_with_client(client, video_id.clone()).await?;
+
+    eprintln!(
+        "[fetch_full_video_info] {} -> title={:?}, start_time={:?}, uploader_id={:?}, uploader_name={:?}, view_count={}, tags={}, has_description={}",
+        video_id,
+        video.title,
+        video.start_time,
+        video.uploader_id,
+        video.uploader_name,
+        video.view_count,
+        video.tags.len(),
+        video.description.is_some()
+    );
+
+    Ok(video)
+}
+
 #[tauri::command]
 pub async fn get_playlist_state(
     state: tauri::State<'_, AppState>,
@@ -98,6 +343,12 @@ pub async fn set_playlist_index(
     let video = results[index].clone();
     let has_next = index + 1 < results.len();
     let playlist_version = state.get_list_context_version(&list_id);
+    let enrichment_request = build_playback_enrichment_request(
+        list_id.clone(),
+        playlist_version,
+        index,
+        video.clone(),
+    );
 
     app.emit("video-selected", VideoSelectedPayload {
         video,
@@ -107,26 +358,71 @@ pub async fn set_playlist_index(
         playlist_version,
     }).map_err(|e| e.to_string())?;
 
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        let enriched_video = match enrichment_request.kind {
+            PlaybackEnrichmentKind::FetchUserInfo => {
+                let user_info = get_user_info(enrichment_request.video.id.clone())
+                    .await
+                    .ok()
+                    .flatten();
+                resolve_playback_enrichment_video(&enrichment_request, None, user_info)
+            }
+            PlaybackEnrichmentKind::FetchFullVideoInfo => {
+                let full_video = fetch_full_video_info(enrichment_request.video.id.clone())
+                    .await
+                    .ok();
+                resolve_playback_enrichment_video(&enrichment_request, full_video, None)
+            }
+        };
+
+        let state = app_handle.state::<AppState>();
+        if let Some(payload) = apply_playback_metadata_update(
+            &state,
+            &enrichment_request.list_id,
+            enrichment_request.playlist_version,
+            enrichment_request.index,
+            enriched_video,
+        ) {
+            let _ = app_handle.emit("playback-video-updated", payload);
+        }
+    });
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn update_playlist_video(
+    app: AppHandle,
     index: usize,
     video: Video,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    // Get list_id from active_playback
     let active_playback = state.active_playback.read();
-    let list_id = active_playback.as_ref()
-        .map(|p| p.list_id.clone())
+    let playback = active_playback
+        .as_ref()
+        .cloned()
         .ok_or_else(|| "No active playback.".to_string())?;
     drop(active_playback);
-    if state.update_list_context_item(&list_id, index, video.clone()) {
-        Ok(())
-    } else {
-        Err("Index out of bounds or list not found".to_string())
+
+    let payload = apply_playback_metadata_update(
+        &state,
+        &playback.list_id,
+        playback.list_version,
+        index,
+        video,
+    );
+
+    if index >= state.get_list_context_items(&playback.list_id).len() {
+        return Err("Index out of bounds or list not found".to_string());
     }
+
+    if let Some(payload) = payload {
+        app.emit("playback-video-updated", payload)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1924,102 +2220,6 @@ pub async fn set_playlist_type(
 
 // ===== Video Info Fetching =====
 
-#[tauri::command]
-pub async fn fetch_full_video_info(
-    video_id: String,
-) -> Result<Video, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("vocaloid-search-desktop/1.0")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-    // Fetch getthumbinfo API for base metadata
-    let thumb_url = format!("https://ext.nicovideo.jp/api/getthumbinfo/{}", video_id);
-    let thumb_response = client
-        .get(&thumb_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch thumbinfo: {}", e))?;
-    let thumb_xml = thumb_response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read thumbinfo response: {}", e))?;
-
-    // Parse XML to extract video info
-    let thumb_info = parse_thumbinfo_xml(&thumb_xml, &video_id)?;
-
-    // Fetch like_count from snapshot API, but do not fail the whole request if snapshot is unavailable
-    let snapshot_url = format!(
-        "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search?q={}&fields=likeCounter&targets=contentId",
-        video_id
-    );
-    let like_count = match client.get(&snapshot_url).send().await {
-        Ok(snapshot_response) => {
-            #[derive(Debug, serde::Deserialize)]
-            struct SnapshotResponse {
-                data: Vec<SnapshotVideo>,
-            }
-
-            match snapshot_response.json::<SnapshotResponse>().await {
-                Ok(snapshot_data) => snapshot_data.data.first().and_then(|v| v.likeCounter).unwrap_or(0),
-                Err(e) => {
-                    eprintln!("[fetch_full_video_info] Failed to parse snapshot response for {}: {}", video_id, e);
-                    0
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[fetch_full_video_info] Failed to fetch snapshot for {}: {}", video_id, e);
-            0
-        }
-    };
-    
-    // Parse duration from MM:SS format
-    let duration = thumb_info.length.as_ref().and_then(|s| {
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() == 2 {
-            let mins: i64 = parts[0].parse().ok()?;
-            let secs: i64 = parts[1].parse().ok()?;
-            Some(mins * 60 + secs)
-        } else {
-            None
-        }
-    });
-    
-    let video = Video {
-        id: thumb_info.id,
-        title: thumb_info.title,
-        thumbnail_url: thumb_info.thumbnail_url,
-        watch_url: Some(format!("https://www.nicovideo.jp/watch/{}", video_id)),
-        view_count: thumb_info.view_counter.unwrap_or(0),
-        comment_count: thumb_info.comment_num.unwrap_or(0),
-        mylist_count: thumb_info.mylist_counter.unwrap_or(0),
-        like_count,
-        start_time: thumb_info.first_retrieve,
-        tags: thumb_info.tags.unwrap_or_default(),
-        duration,
-        uploader_id: thumb_info.user_id,
-        uploader_name: thumb_info.user_nickname,
-        description: thumb_info.description,
-        is_watched: false,
-    };
-    
-    eprintln!(
-        "[fetch_full_video_info] {} -> title={:?}, start_time={:?}, uploader_id={:?}, uploader_name={:?}, view_count={}, tags={}, has_description={}",
-        video_id,
-        video.title,
-        video.start_time,
-        video.uploader_id,
-        video.uploader_name,
-        video.view_count,
-        video.tags.len(),
-        video.description.is_some()
-    );
-    
-    Ok(video)
-}
-
 fn parse_thumbinfo_xml(xml: &str, video_id: &str) -> Result<ThumbInfo, String> {
     if let Some(error_code) = extract_xml_tag(xml, "code") {
         let error_description = extract_xml_tag(xml, "description")
@@ -2344,10 +2544,410 @@ mod tests {
             }),
             formula_filter: None,
         };
-        
+
         let (sql, _params, _count_sql) = build_search_query(&request, &[]);
-        
-        assert!(sql.contains("v.id DESC"), 
+
+        assert!(sql.contains("v.id DESC"),
             "ORDER BY for custom sort should include v.id DESC tie-breaker: {}", sql);
+    }
+
+    #[test]
+    fn applies_playback_metadata_update_and_returns_payload_for_active_playback() {
+        let test = TestAppState::new();
+        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+        let updated_video = Video {
+            title: "updated title".to_string(),
+            ..sample_video("sm9")
+        };
+
+        let payload = apply_playback_metadata_update(
+            &test.state,
+            &ListContextId::History,
+            history_version,
+            2,
+            updated_video.clone(),
+        );
+
+        assert_eq!(
+            test.state.get_list_context_items(&ListContextId::History)[2].title,
+            "updated title"
+        );
+        assert_eq!(
+            payload,
+            Some(PlaybackVideoUpdatedPayload::new(
+                ListContextId::History,
+                history_version,
+                2,
+                updated_video,
+            ))
+        );
+    }
+
+    #[test]
+    fn applies_playback_metadata_update_without_payload_for_stale_playback() {
+        let test = TestAppState::new();
+        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+        let updated_video = Video {
+            title: "updated title".to_string(),
+            ..sample_video("sm9")
+        };
+
+        let payload = apply_playback_metadata_update(
+            &test.state,
+            &ListContextId::History,
+            history_version,
+            1,
+            updated_video,
+        );
+
+        assert_eq!(
+            test.state.get_list_context_items(&ListContextId::History)[1].title,
+            "updated title"
+        );
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn skips_playback_metadata_update_payload_for_stale_identity() {
+        let test = TestAppState::new();
+        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+
+        let payload = build_playback_metadata_update_payload(
+            &test.state,
+            &ListContextId::History,
+            history_version + 1,
+            2,
+            sample_video("sm9"),
+        );
+
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn search_selection_uses_user_info_enrichment_strategy() {
+        let request = build_playback_enrichment_request(
+            ListContextId::Search,
+            4,
+            1,
+            sample_video("sm9"),
+        );
+
+        assert_eq!(request.kind, PlaybackEnrichmentKind::FetchUserInfo);
+        assert_eq!(request.playlist_version, 4);
+        assert_eq!(request.index, 1);
+        assert_eq!(request.video.id, "sm9");
+    }
+
+    #[test]
+    fn history_selection_uses_full_video_enrichment_strategy() {
+        let request = build_playback_enrichment_request(
+            ListContextId::History,
+            7,
+            2,
+            sample_video("sm9"),
+        );
+
+        assert_eq!(request.kind, PlaybackEnrichmentKind::FetchFullVideoInfo);
+        assert_eq!(request.playlist_version, 7);
+        assert_eq!(request.index, 2);
+        assert_eq!(request.video.id, "sm9");
+    }
+
+    #[test]
+    fn merge_user_info_into_video_updates_uploader_fields_only() {
+        let merged = merge_user_info_into_video(
+            sample_video("sm9"),
+            Some(UserInfo {
+                user_id: Some("42".to_string()),
+                user_nickname: Some("MikuP".to_string()),
+                user_icon_url: Some("https://example.com/icon.jpg".to_string()),
+            }),
+        );
+
+        assert_eq!(merged.uploader_id.as_deref(), Some("42"));
+        assert_eq!(merged.uploader_name.as_deref(), Some("MikuP"));
+        assert_eq!(merged.title, "title-sm9");
+        assert_eq!(merged.like_count, 4);
+    }
+
+    #[test]
+    fn merge_user_info_into_video_keeps_existing_fields_when_user_info_missing() {
+        let original = sample_video("sm9");
+        let merged = merge_user_info_into_video(original.clone(), None);
+
+        assert_eq!(merged, original);
+    }
+
+    #[test]
+    fn resolve_search_enrichment_video_merges_user_info_without_snapshot_refetch() {
+        let request = build_playback_enrichment_request(
+            ListContextId::Search,
+            4,
+            1,
+            sample_video("sm9"),
+        );
+
+        let resolved = resolve_playback_enrichment_video(
+            &request,
+            Some(Video {
+                title: "should not win".to_string(),
+                ..sample_video("sm9")
+            }),
+            Some(UserInfo {
+                user_id: Some("42".to_string()),
+                user_nickname: Some("MikuP".to_string()),
+                user_icon_url: Some("https://example.com/icon.jpg".to_string()),
+            }),
+        );
+
+        assert_eq!(resolved.title, "title-sm9");
+        assert_eq!(resolved.uploader_id.as_deref(), Some("42"));
+        assert_eq!(resolved.uploader_name.as_deref(), Some("MikuP"));
+    }
+
+    #[test]
+    fn resolve_non_search_enrichment_video_prefers_full_video_and_falls_back_to_placeholder() {
+        let request = build_playback_enrichment_request(
+            ListContextId::History,
+            7,
+            2,
+            sample_video("sm9"),
+        );
+        let full_video = Video {
+            title: "full info title".to_string(),
+            like_count: 99,
+            ..sample_video("sm9")
+        };
+
+        let resolved = resolve_playback_enrichment_video(&request, Some(full_video.clone()), None);
+        let fallback = resolve_playback_enrichment_video(&request, None, None);
+
+        assert_eq!(resolved, full_video);
+        assert_eq!(fallback, request.video);
+    }
+
+    #[test]
+    fn build_full_video_from_thumbinfo_prefers_thumbinfo_base_and_snapshot_like_count() {
+        let video = build_full_video_from_thumbinfo(
+            "sm9",
+            sample_thumb_info(),
+            Some(SnapshotVideo {
+                contentId: "sm9".to_string(),
+                title: "snapshot title should not win".to_string(),
+                thumbnailUrl: serde_json::json!("https://example.com/snapshot.jpg"),
+                viewCounter: Some(999),
+                commentCounter: Some(888),
+                mylistCounter: Some(777),
+                likeCounter: Some(66),
+                startTime: Some("2024-02-02T00:00:00+09:00".to_string()),
+                tags: Some(serde_json::json!(["snapshot"])),
+                lengthSeconds: Some(456),
+                genre: None,
+                description: Some("snapshot desc".to_string()),
+                userId: Some("snapshot-user".to_string()),
+            }),
+        );
+
+        assert_eq!(video.title, "thumb title");
+        assert_eq!(video.like_count, 66);
+        assert_eq!(video.view_count, 123);
+        assert_eq!(video.comment_count, 45);
+        assert_eq!(video.mylist_count, 6);
+        assert_eq!(video.uploader_id.as_deref(), Some("42"));
+        assert_eq!(video.uploader_name.as_deref(), Some("MikuP"));
+        assert_eq!(video.duration, Some(83));
+    }
+
+    #[test]
+    fn build_full_video_from_thumbinfo_falls_back_when_snapshot_is_missing() {
+        let video = build_full_video_from_thumbinfo("sm9", sample_thumb_info(), None);
+
+        assert_eq!(video.title, "thumb title");
+        assert_eq!(video.like_count, 0);
+        assert_eq!(video.view_count, 123);
+        assert_eq!(video.comment_count, 45);
+        assert_eq!(video.mylist_count, 6);
+        assert_eq!(video.duration, Some(83));
+    }
+
+    #[tokio::test]
+    async fn fetch_non_search_enrichment_video_runs_source_fetches_in_parallel() {
+        let started = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let thumb_started = started.clone();
+        let snapshot_started = started.clone();
+        let started_for_thumb_assert = started.clone();
+        let started_for_snapshot_assert = started.clone();
+
+        let now = std::time::Instant::now();
+        let video = fetch_non_search_enrichment_video(
+            "sm9",
+            move || async move {
+                thumb_started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                assert_eq!(
+                    started_for_thumb_assert.load(std::sync::atomic::Ordering::SeqCst),
+                    2
+                );
+                Ok(sample_thumb_info())
+            },
+            move || async move {
+                snapshot_started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                assert_eq!(
+                    started_for_snapshot_assert.load(std::sync::atomic::Ordering::SeqCst),
+                    2
+                );
+                Some(SnapshotVideo {
+                    contentId: "sm9".to_string(),
+                    title: "snapshot".to_string(),
+                    thumbnailUrl: serde_json::json!("https://example.com/snapshot.jpg"),
+                    viewCounter: Some(999),
+                    commentCounter: Some(888),
+                    mylistCounter: Some(777),
+                    likeCounter: Some(66),
+                    startTime: Some("2024-02-02T00:00:00+09:00".to_string()),
+                    tags: Some(serde_json::json!(["snapshot"])),
+                    lengthSeconds: Some(456),
+                    genre: None,
+                    description: Some("snapshot desc".to_string()),
+                    userId: Some("snapshot-user".to_string()),
+                })
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(now.elapsed() < std::time::Duration::from_millis(70));
+        assert_eq!(video.title, "thumb title");
+        assert_eq!(video.like_count, 66);
+    }
+
+    #[tokio::test]
+    async fn fetch_non_search_enrichment_video_keeps_thumbinfo_when_snapshot_missing() {
+        let video = fetch_non_search_enrichment_video(
+            "sm9",
+            || async move { Ok(sample_thumb_info()) },
+            || async move { None },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(video.title, "thumb title");
+        assert_eq!(video.like_count, 0);
+        assert_eq!(video.uploader_name.as_deref(), Some("MikuP"));
+    }
+
+    struct TestAppState {
+        state: AppState,
+        _root: std::path::PathBuf,
+    }
+
+    impl TestAppState {
+        fn new() -> Self {
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("commands-test-{}", unique));
+            std::fs::create_dir_all(&root).unwrap();
+            let videos_path = root.join("videos.db");
+            let user_data_path = root.join("user_data.db");
+            crate::database::init_db(&videos_path, &user_data_path).unwrap();
+            let state = AppState::new(videos_path, user_data_path);
+            Self { state, _root: root }
+        }
+    }
+
+    impl Drop for TestAppState {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self._root);
+        }
+    }
+
+    fn sample_video(id: &str) -> Video {
+        Video {
+            id: id.to_string(),
+            title: format!("title-{id}"),
+            thumbnail_url: Some("https://example.com/thumb.jpg".to_string()),
+            watch_url: Some(format!("https://www.nicovideo.jp/watch/{id}")),
+            view_count: 1,
+            comment_count: 2,
+            mylist_count: 3,
+            like_count: 4,
+            start_time: Some("2025-01-01T00:00:00+09:00".to_string()),
+            tags: vec!["vocaloid".to_string()],
+            duration: Some(123),
+            uploader_id: Some("user-1".to_string()),
+            uploader_name: Some("miku".to_string()),
+            description: Some("desc".to_string()),
+            is_watched: false,
+        }
+    }
+
+    fn sample_thumb_info() -> ThumbInfo {
+        ThumbInfo {
+            id: "sm9".to_string(),
+            title: "thumb title".to_string(),
+            description: Some("thumb desc".to_string()),
+            thumbnail_url: Some("https://example.com/thumb.jpg".to_string()),
+            first_retrieve: Some("2024-01-01T00:00:00+09:00".to_string()),
+            length: Some("01:23".to_string()),
+            view_counter: Some(123),
+            comment_num: Some(45),
+            mylist_counter: Some(6),
+            tags: Some(vec!["vocaloid".to_string(), "miku".to_string()]),
+            user_id: Some("42".to_string()),
+            user_nickname: Some("MikuP".to_string()),
+        }
     }
 }

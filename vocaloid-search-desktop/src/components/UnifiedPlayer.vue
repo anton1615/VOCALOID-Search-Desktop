@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, type Video } from '../api/tauri-commands'
+import { api, type PlaybackIdentityPayload, type PlaylistType, type Video } from '../api/tauri-commands'
 import VideoMetaPanel from './VideoMetaPanel.vue'
 import PlayerControls from './PlayerControls.vue'
 import { usePlayerCore } from '../composables/usePlayerCore'
@@ -20,6 +20,10 @@ const props = withDefaults(defineProps<{
   resultsCount: number
   /** Whether there is a next video */
   hasNext: boolean
+  /** Playback identity type for metadata update filtering */
+  playlistType: PlaylistType
+  /** Playback identity version for metadata update filtering */
+  playlistVersion: number
   /** Whether PIP is active (only for full mode) */
   pipActive?: boolean
   /** Whether to show auto-skip settings */
@@ -66,6 +70,12 @@ const playerCore = usePlayerCore({
   onPlaybackStateChanged: () => {
     emit('playbackStateChanged')
   },
+  getPlaybackIdentity: (): PlaybackIdentityPayload => ({
+    playlistType: props.playlistType,
+    playlistVersion: props.playlistVersion,
+    currentIndex: props.currentVideoIndex,
+    videoId: props.currentVideo?.id ?? null,
+  }),
   isPip: isCompact.value,
   setupEvents: props.setupEvents,
 })
@@ -74,6 +84,10 @@ const playerCore = usePlayerCore({
 const playbackSettingsOpen = ref(false)
 
 // Computed values
+const currentVideo = computed(() => playerCore.currentVideo.value)
+const currentVideoIndex = computed(() => playerCore.currentIndex.value)
+const hasNextVideo = computed(() => playerCore.hasNext.value)
+const metadataReady = computed(() => playerCore.metadataReady.value)
 const isPlaying = computed(() => playerCore.isPlaying.value)
 const playerReady = computed(() => playerCore.playerReady.value)
 
@@ -174,7 +188,7 @@ defineExpose({
           :is-playing="isPlaying"
           :current-index="currentVideoIndex"
           :results-count="resultsCount"
-          :has-next="hasNext"
+          :has-next="hasNextVideo"
           @toggle-play-pause="togglePlayPause"
           @play-next="$emit('playNext')"
           @play-previous="$emit('playPrevious')"
@@ -188,7 +202,7 @@ defineExpose({
           <template v-else>
             <template v-for="section in layoutSections" :key="section.section">
               <VideoMetaPanel
-                v-if="section.section === 'header' || section.section === 'details'"
+                v-if="metadataReady && (section.section === 'header' || section.section === 'details')"
                 :video="currentVideo"
                 :uploader-name="getUserNickname()"
                 :uploader-icon-url="getUserIconUrl()"
@@ -196,7 +210,7 @@ defineExpose({
                 :display-mode="section.videoMetaPanelMode"
               />
 
-              <div v-else class="video-container">
+              <div v-else-if="section.section === 'player'" class="video-container">
                 <div class="aspect-ratio-box">
                   <iframe
                     :ref="(el) => playerCore.setIframeRef(el as HTMLIFrameElement | null)"
@@ -216,7 +230,7 @@ defineExpose({
       <template v-else>
         <template v-for="section in layoutSections" :key="section.section">
           <VideoMetaPanel
-            v-if="currentVideo && (section.section === 'header' || section.section === 'details')"
+            v-if="currentVideo && metadataReady && (section.section === 'header' || section.section === 'details')"
             :video="currentVideo"
             :uploader-name="getUserNickname()"
             :uploader-icon-url="getUserIconUrl()"
@@ -255,7 +269,7 @@ defineExpose({
               :is-playing="isPlaying"
               :current-index="currentVideoIndex"
               :results-count="resultsCount"
-              :has-next="hasNext"
+              :has-next="hasNextVideo"
               :show-auto-skip="showAutoSkip"
               :auto-play="playerCore.autoPlay.value"
               :auto-skip="playerCore.autoSkip.value"

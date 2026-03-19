@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { Video, VideoSelectedPayload, PlaybackSettings } from '../api/tauri-commands'
+import type { PlaybackSettings, PlaybackVideoUpdatedPayload, VideoSelectedPayload } from '../api/tauri-commands'
 
 /**
  * Options for player events
@@ -8,7 +8,9 @@ export interface PlayerEventsOptions {
   /** Whether this is the PIP window */
   isPip?: boolean
   /** Called when a video is selected */
-  onVideoSelected: (video: Video, index: number, hasNext: boolean) => Promise<void>
+  onVideoSelected: (payload: VideoSelectedPayload) => Promise<void>
+  /** Called when playback metadata is updated for the current playback identity */
+  onPlaybackMetadataUpdated?: (payload: PlaybackVideoUpdatedPayload) => Promise<void> | void
   /** Called when playback settings change */
   onPlaybackSettingsChanged: (settings: PlaybackSettings) => void
   /** Called when a video is marked as watched */
@@ -35,9 +37,11 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     onPlaybackSettingsChanged,
     onVideoWatched,
     onActivePlaybackCleared,
+    onPlaybackMetadataUpdated,
   } = options
 
   let unlistenVideoSelected: UnlistenFn | null = null
+  let unlistenPlaybackVideoUpdated: UnlistenFn | null = null
   let unlistenPlaybackSettings: UnlistenFn | null = null
   let unlistenVideoWatched: UnlistenFn | null = null
   let unlistenActivePlaybackCleared: UnlistenFn | null = null
@@ -51,9 +55,18 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     listen<VideoSelectedPayload>('video-selected', async (event) => {
       const payload = event.payload
       console.log(`[${isPip ? 'PiP' : 'Main'}] Received video-selected event:`, payload.video.id, 'index:', payload.index)
-      await onVideoSelected(payload.video, payload.index, payload.has_next)
+      await onVideoSelected(payload)
     }).then((unlisten) => {
       unlistenVideoSelected = unlisten
+    })
+
+    // Listen for playback-video-updated event
+    listen<PlaybackVideoUpdatedPayload>('playback-video-updated', async (event) => {
+      const payload = event.payload
+      console.log(`[${isPip ? 'PiP' : 'Main'}] Received playback-video-updated event:`, payload.video.id, 'index:', payload.index)
+      await onPlaybackMetadataUpdated?.(payload)
+    }).then((unlisten) => {
+      unlistenPlaybackVideoUpdated = unlisten
     })
 
     // Listen for playback-settings-changed event
@@ -85,6 +98,7 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     // Return cleanup function
     return () => {
       if (unlistenVideoSelected) unlistenVideoSelected()
+      if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
       if (unlistenPlaybackSettings) unlistenPlaybackSettings()
       if (unlistenVideoWatched) unlistenVideoWatched()
       if (unlistenActivePlaybackCleared) unlistenActivePlaybackCleared()

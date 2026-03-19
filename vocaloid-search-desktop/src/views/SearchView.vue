@@ -3,7 +3,7 @@ import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type UserInfo, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
+import { api, type Video, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
 import UploaderAvatar from '../components/UploaderAvatar.vue'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
@@ -14,8 +14,6 @@ import { formatDateTime } from '../utils/dateTime'
 const { t } = useI18n()
 
 const SEARCH_STATE_KEY = 'vocaloidSearchState'
-
-const userInfoCache = reactive(new Map<string, UserInfo>())
 
 const query = ref('')
 const loading = ref(false)
@@ -194,17 +192,6 @@ async function playVideo(video: Video) {
   if (index >= 0) {
     await api.setPlaylistType('Search')
     await api.setPlaylistIndex(index)
-    currentVideoIndex.value = index
-    currentVideo.value = video
-    console.log('[playVideo] State updated, currentVideo set to:', video.id)
-
-    if (!userInfoCache.has(video.id)) {
-      api.getUserInfo(video.id).then(userInfo => {
-        if (userInfo) {
-          userInfoCache.set(video.id, userInfo)
-        }
-      })
-    }
   }
 }
 
@@ -445,13 +432,6 @@ onMounted(async () => {
       loadMore()
     }
 
-    if (!userInfoCache.has(payload.video.id)) {
-      api.getUserInfo(payload.video.id).then(userInfo => {
-        if (userInfo) {
-          userInfoCache.set(payload.video.id, userInfo)
-        }
-      })
-    }
   })
 
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {

@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { Video } from '../api/tauri-commands'
+import type { PlaybackIdentityPayload, PlaybackVideoUpdatedPayload, Video, VideoSelectedPayload } from '../api/tauri-commands'
 import { usePlayerEvents, type PlayerEventsOptions } from './usePlayerEvents'
 import { usePlayerSettings } from './usePlayerSettings'
 import { usePlayerInfo } from './usePlayerInfo'
@@ -20,6 +20,8 @@ export interface PlayerCoreOptions {
   onStateCleared?: () => void
   /** Called when backend authoritative playback state changed and parent should refresh */
   onPlaybackStateChanged?: () => void | Promise<void>
+  /** Returns the currently displayed playback identity for stale metadata filtering */
+  getPlaybackIdentity?: () => PlaybackIdentityPayload
   /** Function to schedule a callback (used for auto-play delay) */
   schedule?: (callback: () => void) => void
   /** Whether this is the PIP window */
@@ -38,7 +40,8 @@ export interface PlayerCore {
   isPlaying: Ref<boolean>
   playerReady: Ref<boolean>
   hasNext: Ref<boolean>
-  
+  metadataReady: Ref<boolean>
+
   // Settings
   autoPlay: Ref<boolean>
   autoSkip: Ref<boolean>
@@ -83,6 +86,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     onMarkWatched,
     onStateCleared,
     onPlaybackStateChanged,
+    getPlaybackIdentity,
     schedule = (cb) => setTimeout(cb, 500),
     isPip = false,
     setupEvents = true,
@@ -94,6 +98,8 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   const isPlaying = ref(false)
   const playerReady = ref(false)
   const hasNext = ref(false)
+  const metadataReady = ref(false)
+  const selectedPlaybackIdentity = ref<PlaybackIdentityPayload | null>(null)
   
   // Settings panel state
   const playbackSettingsOpen = ref(false)
@@ -143,7 +149,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   async function handleVideoChange(video: Video | null, index: number, hasNextVideo: boolean): Promise<void> {
     // Clear previous message source
     lastPlayerMessageSource = clearPlayerMessageSource(lastPlayerMessageSource)
-    
+
     currentVideo.value = video
     currentIndex.value = index
     hasNext.value = hasNextVideo
@@ -151,12 +157,16 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     isPlaying.value = false
     hasMarkedCurrent = false
 
-    if (video) {
-      // Fetch user info
-      await playerInfo.fetchUserInfo(video)
-    } else {
+    if (!video) {
+      metadataReady.value = false
+      selectedPlaybackIdentity.value = null
       playerInfo.clearCurrentUserInfo()
+      return
     }
+
+    const displayedIdentity = resolveDisplayedPlaybackIdentity(video, index)
+    const selectionStillPending = !metadataReady.value && samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value)
+    metadataReady.value = !selectionStillPending
   }
 
   /**
@@ -183,6 +193,8 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     isPlaying.value = false
     playerReady.value = false
     hasNext.value = false
+    metadataReady.value = false
+    selectedPlaybackIdentity.value = null
     hasMarkedCurrent = false
     playerInfo.clearCurrentUserInfo()
     
@@ -294,14 +306,86 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     await settings.loadSettings()
   }
 
+  function samePlaybackIdentity(left: PlaybackIdentityPayload | null | undefined, right: PlaybackIdentityPayload | null | undefined): boolean {
+    if (!left || !right) {
+      return false
+    }
+
+    return (
+      left.playlistType === right.playlistType &&
+      left.playlistVersion === right.playlistVersion &&
+      left.currentIndex === right.currentIndex &&
+      left.videoId === right.videoId
+    )
+  }
+
+  function matchesPlaybackIdentity(identity: PlaybackIdentityPayload | null | undefined, payload: PlaybackVideoUpdatedPayload): boolean {
+    if (!identity) {
+      return false
+    }
+
+    return (
+      identity.playlistType === payload.playlist_type &&
+      identity.playlistVersion === payload.playlist_version &&
+      identity.currentIndex === payload.index &&
+      identity.videoId === payload.video.id
+    )
+  }
+
+  function resolveDisplayedPlaybackIdentity(video: Video, index: number): PlaybackIdentityPayload | null {
+    const currentIdentity = getPlaybackIdentity?.()
+    if (currentIdentity?.currentIndex === index && currentIdentity.videoId === video.id) {
+      return currentIdentity
+    }
+
+    if (selectedPlaybackIdentity.value?.currentIndex === index && selectedPlaybackIdentity.value.videoId === video.id) {
+      return selectedPlaybackIdentity.value
+    }
+
+    return null
+  }
+
+  function matchesCurrentPlaybackIdentity(payload: PlaybackVideoUpdatedPayload): boolean {
+    const currentIdentity = getPlaybackIdentity?.()
+    return matchesPlaybackIdentity(currentIdentity, payload) || matchesPlaybackIdentity(selectedPlaybackIdentity.value, payload)
+  }
+
+  function handleVideoSelected(payload: VideoSelectedPayload): Promise<void> {
+    selectedPlaybackIdentity.value = {
+      playlistType: payload.playlist_type,
+      playlistVersion: payload.playlist_version,
+      currentIndex: payload.index,
+      videoId: payload.video.id,
+    }
+    metadataReady.value = false
+    return handleVideoChange(payload.video, payload.index, payload.has_next)
+  }
+
+  function handlePlaybackMetadataUpdated(payload: PlaybackVideoUpdatedPayload): Promise<void> | void {
+    if (!matchesCurrentPlaybackIdentity(payload)) {
+      return
+    }
+
+    currentVideo.value = payload.video
+    metadataReady.value = true
+    return onPlaybackStateChanged?.()
+  }
+
+  function syncVideoFromProps(video: Video | null, index: number, hasNextVideo: boolean): Promise<void> {
+    return handleVideoChange(video, index, hasNextVideo)
+  }
+
   // Set up event listeners if requested
   let eventCleanup: (() => void) | null = null
 
   const eventOptions: PlayerEventsOptions = {
     isPip,
-    onVideoSelected: async (video, index, hasNextVideo) => {
-      await handleVideoChange(video, index, hasNextVideo)
+    onVideoSelected: async (payload) => {
+      await handleVideoSelected(payload)
       await onPlaybackStateChanged?.()
+    },
+    onPlaybackMetadataUpdated: async (payload) => {
+      await handlePlaybackMetadataUpdated(payload)
     },
     onPlaybackSettingsChanged: (newSettings) => {
       settings.syncFromBackend(newSettings)
@@ -318,12 +402,16 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   }
 
   if (!setupEvents) {
-    eventOptions.onVideoSelected = async (video, index, hasNextVideo) => {
-      await handleVideoChange(video, index, hasNextVideo)
+    eventOptions.onVideoSelected = async (payload) => {
+      await handleVideoSelected(payload)
     }
     eventOptions.onActivePlaybackCleared = () => {
       resetState()
     }
+  }
+
+  function syncFromProps(video: Video | null, index: number, hasNextVideo: boolean): Promise<void> {
+    return syncVideoFromProps(video, index, hasNextVideo)
   }
 
   const { setupEventListeners: setupEventsInternal } = usePlayerEvents(eventOptions)
@@ -370,7 +458,8 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     isPlaying,
     playerReady,
     hasNext,
-    
+    metadataReady,
+
     // Settings
     autoPlay: settings.autoPlay,
     autoSkip: settings.autoSkip,
@@ -383,7 +472,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     
     // Actions
     setIframeRef,
-    handleVideoChange,
+    handleVideoChange: syncFromProps,
     updateIndex,
     updateHasNext,
     resetState,

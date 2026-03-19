@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-import { api, type Video } from './api/tauri-commands'
+import { api, type PlaylistType, type Video } from './api/tauri-commands'
 import UnifiedPlayer from './components/UnifiedPlayer.vue'
 import { useAuthoritativePlaybackSync } from './composables/useAuthoritativePlaybackSync'
 
@@ -11,6 +11,8 @@ const currentVideo = ref<Video | null>(null)
 const currentIndex = ref(-1)
 const resultsCount = ref(0)
 const hasNext = ref(false)
+const playlistType = ref<PlaylistType>('Search')
+const playlistVersion = ref(1)
 
 const pipWindow = getCurrentWindow()
 let isClosing = false
@@ -20,11 +22,15 @@ function syncPipPlayback(state: {
   currentVideoIndex: number
   resultsCount: number
   hasNext: boolean
+  playlistType: PlaylistType
+  playlistVersion: number
 }) {
   currentVideo.value = state.currentVideo
   currentIndex.value = state.currentVideoIndex
   resultsCount.value = state.resultsCount
   hasNext.value = state.hasNext
+  playlistType.value = state.playlistType
+  playlistVersion.value = state.playlistVersion
 }
 
 const { refreshActivePlayback } = useAuthoritativePlaybackSync(syncPipPlayback)
@@ -168,6 +174,8 @@ onUnmounted(() => {
       :current-video-index="currentIndex"
       :results-count="resultsCount"
       :has-next="hasNext"
+      :playlist-type="playlistType"
+      :playlist-version="playlistVersion"
       :show-auto-skip="false"
       :setup-events="true"
       @play-next="playNext"

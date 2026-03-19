@@ -35,10 +35,52 @@ describe('playerColumnLayout', () => {
     const watchLaterSource = readFileSync(watchLaterViewPath, 'utf8')
 
     expect(appSource).toContain('PlayerColumn')
-    expect(appSource).toContain('api.fetchFullVideoInfo')
     expect(searchSource).not.toContain('<PlayerColumn')
     expect(historySource).not.toContain('<PlayerColumn')
     expect(watchLaterSource).not.toContain('<PlayerColumn')
+  })
+
+  test('playback views no longer hydrate metadata directly after selection', () => {
+    const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')
+    const historyViewPath = resolve(__dirname, '../../views/HistoryView.vue')
+    const watchLaterViewPath = resolve(__dirname, '../../views/WatchLaterView.vue')
+
+    const searchSource = readFileSync(searchViewPath, 'utf8')
+    const historySource = readFileSync(historyViewPath, 'utf8')
+    const watchLaterSource = readFileSync(watchLaterViewPath, 'utf8')
+
+    expect(searchSource).not.toContain('api.getUserInfo')
+    expect(historySource).not.toContain('api.fetchFullVideoInfo')
+    expect(historySource).not.toContain('api.updatePlaylistVideo')
+    expect(historySource).not.toContain('api.getUserInfo')
+    expect(watchLaterSource).not.toContain('api.fetchFullVideoInfo')
+    expect(watchLaterSource).not.toContain('api.updatePlaylistVideo')
+    expect(watchLaterSource).not.toContain('api.getUserInfo')
+  })
+
+  test('app shell and shared player no longer fetch playback metadata directly', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const playerInfoPath = resolve(__dirname, '../../composables/usePlayerInfo.ts')
+    const playerCorePath = resolve(__dirname, '../../composables/usePlayerCore.ts')
+
+    const appSource = readFileSync(appPath, 'utf8')
+    const playerInfoSource = readFileSync(playerInfoPath, 'utf8')
+    const playerCoreSource = readFileSync(playerCorePath, 'utf8')
+
+    expect(appSource).not.toContain('api.fetchFullVideoInfo')
+    expect(playerInfoSource).not.toContain('api.getUserInfo')
+    expect(playerCoreSource).not.toContain('fetchUserInfo(')
+  })
+
+  test('shared player gates metadata panel on metadata readiness state', () => {
+    const playerPath = resolve(__dirname, '../../components/UnifiedPlayer.vue')
+    const playerCorePath = resolve(__dirname, '../../composables/usePlayerCore.ts')
+
+    const playerSource = readFileSync(playerPath, 'utf8')
+    const playerCoreSource = readFileSync(playerCorePath, 'utf8')
+
+    expect(playerSource).toContain('metadataReady')
+    expect(playerCoreSource).toContain('metadataReady')
   })
 
   test('split layout keeps the list pane scrollable after shell extraction', () => {

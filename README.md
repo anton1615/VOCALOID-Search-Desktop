@@ -247,6 +247,33 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.12 - Centralized Playback Metadata Enrichment
+
+**Highlights:**
+- Rust now owns playback metadata enrichment for Search, History, and Watch Later playback
+- The embedded player renders first, then metadata updates in one shot after Rust enrichment completes
+- Main window and PiP now consume the same authoritative playback metadata update flow
+- Search playback keeps fast startup and does not re-fetch Snapshot API on selection
+
+**Bug Fixes:**
+- Search no longer flashes uploader ID as an intermediate UI state before uploader presentation data arrives
+- Matching playback metadata updates no longer get dropped when parent playback props lag behind shared player local state
+- Metadata refresh no longer re-triggers selection-only side effects in the shared player path
+
+**Technical Implementation:**
+- Backend: Added dedicated `playback-video-updated` event carrying playback identity and enriched `Video` payload
+- Backend: History / Watch Later enrichment now merges Snapshot API and `getthumbinfo` results in Rust
+- Backend: Search playback keeps existing list-context metadata and uses Rust enrichment only for uploader presentation data
+- Frontend: Removed window-local playback hydration and direct playback user-info fetching from Search / History / Watch Later views
+- Frontend: Shared player now gates metadata rendering on enrichment readiness and applies updates only when playlist type / version / index / video ID all match
+- Added regression tests covering staged metadata rendering and metadata-update event semantics
+- Synced delta specs to `video-metadata-fetch`, `user-info-fetch`, `playlist-state-sync`, and `unified-player-core`
+
+**Benefits:**
+- Consistent staged playback UX across Search, History, Watch Later, main window, and PiP
+- Fewer stale metadata races between backend events and frontend refresh timing
+- One authoritative playback enrichment path instead of per-view fetch logic
+
 ### v1.5.11 - Browsing/Playback Boundary
 
 **Highlights:**

@@ -247,6 +247,33 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.12 - 再生 metadata enrichment の集約
+
+**主な変更点:**
+- Search / History / Watch Later の再生 metadata enrichment を Rust に集約
+- 埋め込みプレイヤーを先に表示し、その後 Rust enrichment 完了時に metadata を一括更新
+- メインウィンドウと PiP が同じ authoritative playback metadata update フローを使うように統一
+- Search 再生は高速起動を維持し、選択時に Snapshot API を再取得しない
+
+**バグ修正:**
+- Search で uploader 表示情報が届く前に uploader ID が一瞬表示される問題を修正
+- 親側の playback props が shared player のローカル状態より遅れているときでも、対応する metadata update が欠落しないよう修正
+- metadata refresh で shared player の selection-only side effects が再実行されないよう修正
+
+**技術的な実装:**
+- バックエンド：完全な playback identity と enriched `Video` を持つ専用 `playback-video-updated` イベントを追加
+- バックエンド：History / Watch Later の enrichment は Rust 側で Snapshot API と `getthumbinfo` の結果をマージ
+- バックエンド：Search 再生は既存 list context metadata を維持し、Rust enrichment は uploader presentation data の補完のみ実施
+- フロントエンド：Search / History / Watch Later view から window-local な playback hydration と直接的な playback user-info fetch を削除
+- フロントエンド：shared player は enrichment readiness で metadata 描画を制御し、playlist type / version / index / video ID がすべて一致した場合のみ更新を適用
+- staged metadata rendering と metadata update event semantics を検証する回帰テストを追加
+- delta specs を `video-metadata-fetch`、`user-info-fetch`、`playlist-state-sync`、`unified-player-core` に同期
+
+**メリット:**
+- Search / History / Watch Later、メインウィンドウ、PiP で staged playback UX が一貫
+- backend event と frontend refresh のタイミング差による stale metadata race を軽減
+- view ごとの個別 fetch ではなく、単一の authoritative playback enrichment path に統一
+
 ### v1.5.11 - 閲覧/再生境界の分離
 
 **主な変更点:**
