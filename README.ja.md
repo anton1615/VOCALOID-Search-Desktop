@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## リリースノート
 
+### v1.5.11 - 閲覧/再生境界の分離
+
+**主な変更点:**
+- Search / History / Watch Later を切り替えても、現在再生中の playback-bound list を上書きしないように修正
+- 非再生ビューの復元は browsing state のみ更新し、現在の再生セッションを復活・クリアしないように統一
+- メインウィンドウと PiP が同じ backend authoritative playback snapshot から player UI を更新するように統一
+
+**バグ修正:**
+- 非アクティブな list の refresh / restore が、現在再生中セッションに対して playback-cleared 副作用を発生させないように修正
+- 再生イベント後にメインウィンドウと PiP が別々の window-local reset ルールへ依存しないように修正
+
+**技術的な実装:**
+- バックエンド：`set_browsing_list()` は `active_playback` を再バインドせず、browsing context のみ更新
+- バックエンド：active playback clear は、active list が実際に invalidated された場合のみ `active-playback-cleared` を発行
+- フロントエンド：メインウィンドウと PiP が共有 player orchestration を通じて authoritative playback refresh semantics を使用
+- タブ切り替え、非アクティブ list の restore、二画面同期をカバーするテストを追加・更新
+- delta specs を `playlist-context-management`、`unified-player-core`、新規 `playback-browsing-boundary` spec に同期
+
+**メリット:**
+- 別ページを閲覧しても現在の再生が中断されない
+- 非アクティブ list の再読み込みで player が意図せずクリアされない
+- 同じ backend playback event 後でもメインウィンドウと PiP の表示が一致する
+
 ### v1.5.10 - 検索再生スナップショット境界
 
 **主な変更点:**

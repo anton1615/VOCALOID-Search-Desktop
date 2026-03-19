@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## 版本更新說明
 
+### v1.5.11 - 瀏覽 / 播放邊界解耦
+
+**重點更新:**
+- 在 Search、History、Watch Later 間切換時，不再改寫目前播放中的 playback-bound list
+- 還原非播放中的 view 時，現在只更新 browsing state，不會復活或清空目前播放 session
+- 主視窗與 PiP 現在都從同一個 backend authoritative playback snapshot 刷新 player UI
+
+**錯誤修復:**
+- 非 active list 的 refresh / restore 不再對目前播放中的 session 觸發 playback-cleared 副作用
+- 播放事件後，主視窗與 PiP 不再依賴彼此分歧的 window-local reset 規則
+
+**技術實作:**
+- 後端：`set_browsing_list()` 現在只更新 browsing context，不再重綁 `active_playback`
+- 後端：只有 active list 真正 invalidated 時才發送 `active-playback-cleared`
+- 前端：主視窗與 PiP 透過共享 player orchestration 使用一致的 authoritative playback refresh semantics
+- 新增/更新測試，覆蓋 tab switch、non-active list restore、雙視窗 playback 一致性
+- 同步 delta specs 至 `playlist-context-management`、`unified-player-core` 與新 `playback-browsing-boundary` spec
+
+**效益:**
+- 切去其他頁面不會中斷目前播放
+- non-active list reload 不會再誤清空 player
+- 主視窗與 PiP 在同一 backend playback event 後保持一致
+
 ### v1.5.9 - 搜尋分頁排序穩定性
 
 **重點更新:**

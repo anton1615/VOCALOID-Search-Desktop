@@ -247,6 +247,29 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 
 ## Release Notes
 
+### v1.5.11 - Browsing/Playback Boundary
+
+**Highlights:**
+- Switching between Search, History, and Watch Later no longer rewrites the active playback-bound list
+- Restoring a non-playing view now updates browsing state without reviving or clearing the current playback session
+- Main window and PiP now refresh player UI from the same backend authoritative playback snapshot
+
+**Bug Fix:**
+- Refreshing or restoring a non-active list no longer emits playback-cleared side effects for the currently playing session
+- Main window and PiP no longer rely on divergent window-local reset rules after playback events
+
+**Technical Implementation:**
+- Backend: `set_browsing_list()` now updates only browsing context instead of rebinding `active_playback`
+- Backend: active playback clear logic now emits `active-playback-cleared` only when the active list is actually invalidated
+- Frontend: main window and PiP share authoritative playback refresh semantics through shared player orchestration
+- Added/updated tests covering tab switches, non-active list restore, and dual-window playback consistency
+- Synced delta specs to `playlist-context-management`, `unified-player-core`, and new `playback-browsing-boundary` spec
+
+**Benefits:**
+- Browsing another page no longer interrupts current playback
+- Non-active list reloads no longer clear the player unexpectedly
+- Main window and PiP stay visually consistent after the same backend playback event
+
 ### v1.5.10 - Search Playback Snapshot Boundary
 
 **Highlights:**

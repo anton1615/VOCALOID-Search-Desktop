@@ -221,6 +221,10 @@ mod tests {
 4. **路徑別名**：前端使用 `@/*` 對應 `./src/*`
 
 5. **測試驗證**：修改後請執行相關測試確保不破壞現有功能
+6. **OpenSpec 與 release 檔案位置**：`openspec` 指令與 root README/CLAUDE/AGENTS 更新要在 repo root (`D:\Downloads\vocaloid-search-alt`) 執行；三個 release note 檔案是 root `README.md` / `README.ja.md` / `README.zh.md`
+7. **子專案 git 狀態顯示**：從 `vocaloid-search-desktop/` 執行 `git status --short` 時，repo root 檔案會顯示成 `../<file>`（例如 `../CLAUDE.md`）
+8. **OpenSpec delta sync**：若 subagent worktree 看不到 repo root 的 `openspec/`，改在主工作區直接同步 specs，避免 worktree 路徑隔離問題
+9. **shell 小陷阱**：避免用 `printf` 輸出看起來像 option 的分隔字串，bash 可能把它當參數解析
 
 ## 常見陷阱與已知問題
 
@@ -407,25 +411,6 @@ After:
 
 **參見**：`openspec/changes/archive/2026-03-18-stabilize-search-playback-snapshot/`
 
----
-
-### 為什麼將 browsing 與 playback 解耦？(2026-03-19)
-
-**問題**：切換 Search / History / Watch Later 或還原各自的 browsing state 時，visible list 可能誤改 active playback 綁定，導致非播放中的 list refresh 也清空 player，甚至讓主視窗與 PiP 對同一事件呈現不同狀態。
-
-**決策**：將 browsing context 與 active playback reference 分開追蹤：
-- `set_browsing_list()` 只更新目前可見的 list
-- 只有使用者明確選擇影片時才重綁 active playback
-- `active-playback-cleared` 只在目前播放中的 list 被 invalidated 時發送
-- 主視窗與 PiP 都從同一 backend authoritative playback snapshot 刷新 player state
-
-**效益**：
-- 切頁與 restore 不會中斷目前播放
-- non-active list reload 不會誤清空 player
-- 主視窗與 PiP 在同一 backend event 後保持一致
-
-**參見**：`openspec/specs/playback-browsing-boundary/spec.md`
-
 ## OpenSpec 規格驅動開發
 
 本專案使用 OpenSpec 進行規格驅動開發，所有功能變更都應遵循 OpenSpec 工作流程。
@@ -533,7 +518,6 @@ openspec/
 
 | 日期 | 變更名稱 | 說明 |
 |------|----------|------|
-| 2026-03-19 | decouple-browsing-from-playback | 將 browsing context 與 active playback 解耦，並讓主視窗與 PiP 從同一 authoritative playback snapshot 同步 |
 | 2026-03-18 | stabilize-search-playback-snapshot | Search 播放 session 凍結 watched 邊界，確保分頁 membership 穩定 |
 | 2026-03-17 | fix-search-pagination-stability | 修復搜尋分頁排序穩定性，加入 ORDER BY tie-breaker |
 | 2026-03-16 | fix-load-more-frontend-race-condition | 修復前端 loadMore 競態條件，增加 loading 檢查與後端同步 |
@@ -546,7 +530,6 @@ openspec/
 ### 關鍵能力規格
 
 - `playlist-context-management` - 播放清單上下文管理與版本控制
-- `playback-browsing-boundary` - browsing context 與 active playback boundary 規則
 - `unified-player-core` - 統一播放器核心邏輯
 - `rust-state-manager` - Rust 端統一狀態管理
 - `playlist-state-sync` - 播放清單狀態同步

@@ -39,6 +39,7 @@ const emit = defineEmits<{
   (e: 'closePip'): void
   (e: 'videoWatched', video: Video): void
   (e: 'stateCleared'): void
+  (e: 'playbackStateChanged'): void
 }>()
 
 const { t } = useI18n()
@@ -61,6 +62,9 @@ const playerCore = usePlayerCore({
   },
   onStateCleared: () => {
     emit('stateCleared')
+  },
+  onPlaybackStateChanged: () => {
+    emit('playbackStateChanged')
   },
   isPip: isCompact.value,
   setupEvents: props.setupEvents,

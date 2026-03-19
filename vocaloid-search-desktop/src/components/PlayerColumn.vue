@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { listen } from '@tauri-apps/api/event'
+import { ref } from 'vue'
 import type { Video } from '../api/tauri-commands'
 import UnifiedPlayer from './UnifiedPlayer.vue'
 
@@ -19,36 +18,22 @@ const emit = defineEmits<{
   (e: 'openPip'): void
   (e: 'closePip'): void
   (e: 'videoWatched', video: Video): void
+  (e: 'playbackStateChanged'): void
 }>()
 
-// Reference to the unified player for programmatic control
 const unifiedPlayerRef = ref<InstanceType<typeof UnifiedPlayer> | null>(null)
 
-// Event listeners
-let unlistenVideoWatched: (() => void) | null = null
+function handlePlaybackStateChanged() {
+  emit('playbackStateChanged')
+}
 
-// Handle video watched event from UnifiedPlayer
 function handleVideoWatched(video: Video) {
   emit('videoWatched', video)
 }
 
-// Handle state cleared event from UnifiedPlayer
 function handleStateCleared() {
-  // The parent (App.vue) handles the actual state reset
-  // This is just for any local cleanup if needed
+  // Parent refreshes authoritative playback state.
 }
-
-// Lifecycle
-onMounted(async () => {
-  // Listen for video-watched event (for local state sync if needed)
-  unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', () => {
-    // Update handled by parent
-  })
-})
-
-onUnmounted(() => {
-  if (unlistenVideoWatched) unlistenVideoWatched()
-})
 </script>
 
 <template>
@@ -62,13 +47,14 @@ onUnmounted(() => {
       :has-next="hasNext"
       :pip-active="pipActive"
       :show-auto-skip="showAutoSkip"
-      :setup-events="false"
+      :setup-events="true"
       @play-next="$emit('playNext')"
       @play-previous="$emit('playPrevious')"
       @open-pip="$emit('openPip')"
       @close-pip="$emit('closePip')"
       @video-watched="handleVideoWatched"
       @state-cleared="handleStateCleared"
+      @playback-state-changed="handlePlaybackStateChanged"
     />
   </div>
 </template>

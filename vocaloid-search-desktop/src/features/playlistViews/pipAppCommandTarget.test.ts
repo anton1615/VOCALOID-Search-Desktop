@@ -17,14 +17,26 @@ describe('PipApp command target handling', () => {
     expect(source).toContain('lastPlayerMessageSource = rememberPlayerMessageSource(event.source)')
   })
 
-  test('guards PiP playback updates with playlist version-aware playlist state checks', () => {
-    // After refactoring, the playlist version checks are in PipApp.vue
+  test('wires PiP player events through UnifiedPlayer shared event handling', () => {
     const pipAppPath = resolve(__dirname, '../../PipApp.vue')
     const source = readFileSync(pipAppPath, 'utf8')
 
-    expect(source).toContain('const latestPlaylistState = await api.getPlaylistState()')
-    expect(source).toContain('payload.playlist_type !== latestPlaylistState.playlist_type')
-    expect(source).toContain('payload.playlist_version !== latestPlaylistState.playlist_version')
-    expect(source).toContain('await handleVideoChange(payload.video, payload.index, payload.has_next)')
+    expect(source).toContain(':setup-events="true"')
+    expect(source).toContain('@playback-state-changed="handlePlaybackStateChanged"')
+    expect(source).not.toContain("listen<VideoSelectedPayload>('video-selected'")
+    expect(source).not.toContain("listen('active-playback-cleared'")
+  })
+
+  test('wires main window player events through UnifiedPlayer shared event handling', () => {
+    const playerColumnPath = resolve(__dirname, '../../components/PlayerColumn.vue')
+    const appPath = resolve(__dirname, '../../App.vue')
+    const playerColumnSource = readFileSync(playerColumnPath, 'utf8')
+    const appSource = readFileSync(appPath, 'utf8')
+
+    expect(playerColumnSource).toContain(':setup-events="true"')
+    expect(playerColumnSource).toContain('@playback-state-changed="handlePlaybackStateChanged"')
+    expect(appSource).toContain('@playback-state-changed="handlePlaybackStateChanged"')
+    expect(appSource).not.toContain("listen<VideoSelectedPayload>('video-selected'")
+    expect(appSource).not.toContain("listen('active-playback-cleared'")
   })
 })

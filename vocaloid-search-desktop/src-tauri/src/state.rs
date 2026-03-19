@@ -42,6 +42,7 @@ pub struct AppState {
     pub db: Database,
     pub current_video: Arc<RwLock<Option<Video>>>,
     pub pip_active: Arc<RwLock<bool>>,
+    pub browsing_list: Arc<RwLock<ListContextId>>,
     // New list-context model
     pub list_contexts: Arc<RwLock<HashMap<ListContextId, ListContext>>>,
     pub active_playback: Arc<RwLock<Option<ActivePlayback>>>,
@@ -66,6 +67,7 @@ impl AppState {
             db: Database::new(videos_path, user_data_path),
             current_video: Arc::new(RwLock::new(None)),
             pip_active: Arc::new(RwLock::new(false)),
+            browsing_list: Arc::new(RwLock::new(ListContextId::Search)),
             list_contexts: Arc::new(RwLock::new(HashMap::new())),
             active_playback: Arc::new(RwLock::new(None)),
             search_playback_snapshot: Arc::new(RwLock::new(None)),
@@ -175,8 +177,9 @@ impl AppState {
         *snapshot = None;
     }
 
-    /// Clear active playback if it belongs to the specified list
-    pub fn clear_active_playback_for_list(&self, list_id: &ListContextId) {
+    /// Clear active playback if it belongs to the specified list.
+    /// Returns true when playback was actually cleared.
+    pub fn clear_active_playback_for_list(&self, list_id: &ListContextId) -> bool {
         let mut playback = self.active_playback.write();
         if let Some(ref p) = *playback {
             if &p.list_id == list_id {
@@ -186,8 +189,10 @@ impl AppState {
                     let mut snapshot = self.search_playback_snapshot.write();
                     *snapshot = None;
                 }
+                return true;
             }
         }
+        false
     }
 
     /// Create or reuse Search playback snapshot for the current Search session
@@ -364,25 +369,14 @@ impl AppState {
         false
     }
 
-    /// Set the browsing list (used by set_playlist_type)
-    /// This sets active_playback with is_playing=false if no active playback exists
-    /// If there's already active playback, this updates the list_id but preserves the index and is_playing
+    /// Set the currently visible browsing list without changing active playback.
     pub fn set_browsing_list(&self, list_id: ListContextId) {
-        let list_version = self.get_list_context_version(&list_id);
-        let mut playback = self.active_playback.write();
-        if let Some(ref mut p) = *playback {
-            // Update the list_id but preserve index and is_playing
-            p.list_id = list_id;
-            p.list_version = list_version;
-        } else {
-            // Create new active_playback with is_playing=false
-            *playback = Some(ActivePlayback {
-                list_id,
-                list_version,
-                current_index: 0,
-                is_playing: false,
-            });
-        }
+        let mut browsing = self.browsing_list.write();
+        *browsing = list_id;
+    }
+
+    pub fn get_browsing_list(&self) -> ListContextId {
+        self.browsing_list.read().clone()
     }
 }
 
@@ -444,6 +438,77 @@ mod tests {
             crate::models::PlaylistType::Search,
             crate::models::PlaylistType::History,
         ));
+    }
+
+    #[test]
+    fn switching_browsing_list_preserves_existing_active_playback_binding() {
+        let test = TestAppState::new();
+        let search_version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.set_active_playback(ListContextId::Search, search_version, 2);
+
+        test.state.set_browsing_list(ListContextId::History);
+
+        let playback = test.state.active_playback.read().clone();
+        assert_eq!(
+            playback.as_ref().map(|p| &p.list_id),
+            Some(&ListContextId::Search),
+            "switching visible pages must not rewrite the playback-bound list"
+        );
+        assert_eq!(
+            playback.as_ref().map(|p| p.current_index),
+            Some(2),
+            "switching visible pages must preserve the active playback index"
+        );
+        assert_eq!(
+            playback.as_ref().map(|p| p.list_version),
+            Some(search_version),
+            "switching visible pages must preserve the active playback version"
+        );
+    }
+
+    #[test]
+    fn switching_browsing_list_without_playback_does_not_create_active_playback() {
+        let test = TestAppState::new();
+
+        test.state.set_browsing_list(ListContextId::History);
+
+        let playback = test.state.active_playback.read().clone();
+        assert!(
+            playback.is_none(),
+            "switching visible pages without an explicit selection must not create active playback"
+        );
+    }
+
+    #[test]
+    fn clear_active_playback_for_list_reports_false_for_non_active_list() {
+        let test = TestAppState::new();
+        let search_version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.set_active_playback(ListContextId::Search, search_version, 1);
+
+        let cleared = test.state.clear_active_playback_for_list(&ListContextId::History);
+
+        assert!(!cleared, "non-active list refreshes must not report playback cleared");
+        let playback = test.state.active_playback.read().clone();
+        assert_eq!(
+            playback.as_ref().map(|p| &p.list_id),
+            Some(&ListContextId::Search),
+            "non-active list refreshes must preserve active playback"
+        );
+    }
+
+    #[test]
+    fn clear_active_playback_for_list_reports_true_for_active_list() {
+        let test = TestAppState::new();
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state.set_active_playback(ListContextId::History, history_version, 0);
+
+        let cleared = test.state.clear_active_playback_for_list(&ListContextId::History);
+
+        assert!(cleared, "active list invalidation must report playback cleared");
+        assert!(
+            test.state.active_playback.read().is_none(),
+            "active list invalidation must clear playback"
+        );
     }
 
     // Search playback snapshot tests

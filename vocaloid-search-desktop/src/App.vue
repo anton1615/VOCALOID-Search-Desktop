@@ -4,11 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
+
+import { api, type Video } from './api/tauri-commands'
 import PlayerColumn from './components/PlayerColumn.vue'
-import { api, type Video, type VideoSelectedPayload } from './api/tauri-commands'
-import { useThemeStore } from './stores/theme'
-import { useLocaleStore, type Locale } from './stores/locale'
+import { useAuthoritativePlaybackSync } from './composables/useAuthoritativePlaybackSync'
 import { i18n } from './i18n'
+import { useLocaleStore, type Locale } from './stores/locale'
+import { useThemeStore } from './stores/theme'
 
 const router = useRouter()
 const route = useRoute()
@@ -46,18 +48,23 @@ watch(() => localeStore.locale, (newLocale) => {
 
 const showsSplitLayout = computed(() => route.name !== 'scraper')
 
-async function syncActivePlayback(state: { results: Video[]; index: number | null; has_next: boolean; pip_active: boolean }) {
-  resultsCount.value = state.results.length
-  hasNext.value = state.has_next
-  pipActive.value = state.pip_active
+async function syncActivePlayback(state: {
+  currentVideo: Video | null
+  currentVideoIndex: number
+  resultsCount: number
+  hasNext: boolean
+  pipActive?: boolean
+}) {
+  resultsCount.value = state.resultsCount
+  hasNext.value = state.hasNext
+  pipActive.value = state.pipActive ?? false
 
-  if (state.index !== null && state.index >= 0 && state.index < state.results.length) {
-    currentVideoIndex.value = state.index
-    const baseVideo = state.results[state.index]
+  if (state.currentVideo) {
+    currentVideoIndex.value = state.currentVideoIndex
     try {
-      currentVideo.value = await api.fetchFullVideoInfo(baseVideo.id)
+      currentVideo.value = await api.fetchFullVideoInfo(state.currentVideo.id)
     } catch {
-      currentVideo.value = baseVideo
+      currentVideo.value = state.currentVideo
     }
   } else {
     currentVideoIndex.value = -1
@@ -65,9 +72,36 @@ async function syncActivePlayback(state: { results: Video[]; index: number | nul
   }
 }
 
-async function refreshActivePlayback() {
-  const playlistState = await api.getPlaylistState()
-  await syncActivePlayback(playlistState)
+const { refreshActivePlayback } = useAuthoritativePlaybackSync(syncActivePlayback)
+
+function handlePlaybackStateChanged() {
+  void refreshActivePlayback()
+}
+
+function handlePipClosed() {
+  pipActive.value = false
+}
+
+function handleFreshnessCheckError(error: unknown) {
+  console.error('Failed to check freshness:', error)
+}
+
+async function initializeAppState() {
+  const freshness = await invoke<{ is_fresh: boolean; message: string; local_last_update?: string | null; api_last_update?: string | null }>('check_database_freshness')
+
+  freshnessStatus.value = {
+    message: freshness.message,
+    isFresh: freshness.is_fresh,
+    localLastUpdate: freshness.local_last_update ?? null,
+    apiLastUpdate: freshness.api_last_update ?? null,
+  }
+
+  await refreshActivePlayback()
+
+  if (!freshness.is_fresh) {
+    shouldRedirectToScraper.value = true
+    router.push('/scraper')
+  }
 }
 
 async function playNext() {
@@ -122,50 +156,21 @@ function stopDrag() {
   document.removeEventListener('mouseup', stopDrag)
 }
 
-let unlistenVideoSelected: (() => void) | null = null
 let unlistenPipClosed: (() => void) | null = null
-let unlistenActivePlaybackCleared: (() => void) | null = null
 
 onMounted(async () => {
   try {
-    const freshness = await invoke<{ is_fresh: boolean; message: string; local_last_update?: string | null; api_last_update?: string | null }>('check_database_freshness')
-
-    freshnessStatus.value = {
-      message: freshness.message,
-      isFresh: freshness.is_fresh,
-      localLastUpdate: freshness.local_last_update ?? null,
-      apiLastUpdate: freshness.api_last_update ?? null,
-    }
-
-    await refreshActivePlayback()
-
-    unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async () => {
-      await refreshActivePlayback()
-    })
-
-    unlistenPipClosed = await listen('pip-closed', () => {
-      pipActive.value = false
-    })
-
-    unlistenActivePlaybackCleared = await listen('active-playback-cleared', async () => {
-      await refreshActivePlayback()
-    })
-
-    if (!freshness.is_fresh) {
-      shouldRedirectToScraper.value = true
-      router.push('/scraper')
-    }
+    await initializeAppState()
+    unlistenPipClosed = await listen('pip-closed', handlePipClosed)
   } catch (e) {
-    console.error('Failed to check freshness:', e)
+    handleFreshnessCheckError(e)
   } finally {
     isLoading.value = false
   }
 })
 
 onUnmounted(() => {
-  if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPipClosed) unlistenPipClosed()
-  if (unlistenActivePlaybackCleared) unlistenActivePlaybackCleared()
   stopDrag()
 })
 </script>
@@ -204,7 +209,7 @@ onUnmounted(() => {
         </div>
       </div>
     </nav>
-    
+
     <main class="main-content">
       <div v-if="isLoading" class="loading">
         <div class="spinner"></div>
@@ -234,6 +239,7 @@ onUnmounted(() => {
             @open-pip="openPip"
             @close-pip="closePip"
             @video-watched="handleVideoWatched"
+            @playback-state-changed="handlePlaybackStateChanged"
           />
         </div>
       </template>

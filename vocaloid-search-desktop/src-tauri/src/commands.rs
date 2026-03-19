@@ -68,13 +68,9 @@ pub async fn set_playlist_index(
     index: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    // Get list_id from active_playback (set by set_playlist_type)
-    let active_playback = state.active_playback.read();
-    let list_id = active_playback.as_ref()
-        .map(|p| p.list_id.clone())
-        .ok_or_else(|| "No active playback. Call set_playlist_type first.".to_string())?;
+    // Use the current browsing list as the source for explicit selection.
+    let list_id = state.get_browsing_list();
     let playlist_type = PlaylistType::from(&list_id);
-    drop(active_playback);
     // Get results from list_contexts
     let results = state.get_list_context_items(&list_id);
     let results = if results.is_empty() {
@@ -826,10 +822,12 @@ pub async fn search(
         ss.results = results.clone();
         
         // Clear active playback for Search when query changes
-        state.clear_active_playback_for_list(&ListContextId::Search);
+        let playback_cleared = state.clear_active_playback_for_list(&ListContextId::Search);
         // Invalidate Search playback snapshot when Search conditions change
         state.invalidate_search_playback_snapshot();
-        app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
+        if playback_cleared {
+            app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
+        }
     } else {
         // Update pagination state for subsequent pages
         let mut ss = state.search_state.write();
@@ -1147,8 +1145,10 @@ pub async fn get_history(
             context.version += 1;
             // Clear active playback if History was playing
             drop(contexts);
-            state.clear_active_playback_for_list(&ListContextId::History);
-            app.emit("active-playback-cleared", "History").map_err(|e| e.to_string())?;
+            let playback_cleared = state.clear_active_playback_for_list(&ListContextId::History);
+            if playback_cleared {
+                app.emit("active-playback-cleared", "History").map_err(|e| e.to_string())?;
+            }
             contexts = state.list_contexts.write();
         }
         
@@ -1793,8 +1793,10 @@ pub async fn get_watch_later(
             context.version += 1;
             // Clear active playback if WatchLater was playing
             drop(contexts);
-            state.clear_active_playback_for_list(&ListContextId::WatchLater);
-            app.emit("active-playback-cleared", "WatchLater").map_err(|e| e.to_string())?;
+            let playback_cleared = state.clear_active_playback_for_list(&ListContextId::WatchLater);
+            if playback_cleared {
+                app.emit("active-playback-cleared", "WatchLater").map_err(|e| e.to_string())?;
+            }
             contexts = state.list_contexts.write();
         }
         

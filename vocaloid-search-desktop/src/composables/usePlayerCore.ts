@@ -18,11 +18,13 @@ export interface PlayerCoreOptions {
   onMarkWatched: (video: Video) => void
   /** Called when player state is cleared (e.g., from active-playback-cleared event) */
   onStateCleared?: () => void
+  /** Called when backend authoritative playback state changed and parent should refresh */
+  onPlaybackStateChanged?: () => void | Promise<void>
   /** Function to schedule a callback (used for auto-play delay) */
   schedule?: (callback: () => void) => void
   /** Whether this is the PIP window */
   isPip?: boolean
-  /** Whether to set up event listeners (true for PIP, false for main window where App.vue handles events) */
+  /** Whether to set up event listeners */
   setupEvents?: boolean
 }
 
@@ -80,6 +82,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     onPlayPrevious,
     onMarkWatched,
     onStateCleared,
+    onPlaybackStateChanged,
     schedule = (cb) => setTimeout(cb, 500),
     isPip = false,
     setupEvents = true,
@@ -298,6 +301,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     isPip,
     onVideoSelected: async (video, index, hasNextVideo) => {
       await handleVideoChange(video, index, hasNextVideo)
+      await onPlaybackStateChanged?.()
     },
     onPlaybackSettingsChanged: (newSettings) => {
       settings.syncFromBackend(newSettings)
@@ -307,9 +311,19 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
         currentVideo.value = { ...currentVideo.value, is_watched: isWatched }
       }
     },
-    onActivePlaybackCleared: () => {
+    onActivePlaybackCleared: async () => {
       resetState()
+      await onPlaybackStateChanged?.()
     },
+  }
+
+  if (!setupEvents) {
+    eventOptions.onVideoSelected = async (video, index, hasNextVideo) => {
+      await handleVideoChange(video, index, hasNextVideo)
+    }
+    eventOptions.onActivePlaybackCleared = () => {
+      resetState()
+    }
   }
 
   const { setupEventListeners: setupEventsInternal } = usePlayerEvents(eventOptions)
