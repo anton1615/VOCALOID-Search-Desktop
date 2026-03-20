@@ -100,6 +100,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   const hasNext = ref(false)
   const metadataReady = ref(false)
   const selectedPlaybackIdentity = ref<PlaybackIdentityPayload | null>(null)
+  const resolvedPlaybackIdentity = ref<PlaybackIdentityPayload | null>(null)
   
   // Settings panel state
   const playbackSettingsOpen = ref(false)
@@ -160,13 +161,20 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     if (!video) {
       metadataReady.value = false
       selectedPlaybackIdentity.value = null
+      resolvedPlaybackIdentity.value = null
       playerInfo.clearCurrentUserInfo()
       return
     }
 
     const displayedIdentity = resolveDisplayedPlaybackIdentity(video, index)
-    const selectionStillPending = !metadataReady.value && samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value)
+    const selectionStillPending =
+      samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value) &&
+      !samePlaybackIdentity(displayedIdentity, resolvedPlaybackIdentity.value)
     metadataReady.value = !selectionStillPending
+
+    if (!selectionStillPending && displayedIdentity && samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value)) {
+      resolvedPlaybackIdentity.value = displayedIdentity
+    }
   }
 
   /**
@@ -195,6 +203,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     hasNext.value = false
     metadataReady.value = false
     selectedPlaybackIdentity.value = null
+    resolvedPlaybackIdentity.value = null
     hasMarkedCurrent = false
     playerInfo.clearCurrentUserInfo()
     
@@ -351,11 +360,15 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   }
 
   function handleVideoSelected(payload: VideoSelectedPayload): Promise<void> {
-    selectedPlaybackIdentity.value = {
+    const nextIdentity = {
       playlistType: payload.playlist_type,
       playlistVersion: payload.playlist_version,
       currentIndex: payload.index,
       videoId: payload.video.id,
+    }
+    selectedPlaybackIdentity.value = nextIdentity
+    if (samePlaybackIdentity(nextIdentity, resolvedPlaybackIdentity.value)) {
+      resolvedPlaybackIdentity.value = null
     }
     metadataReady.value = false
     return handleVideoChange(payload.video, payload.index, payload.has_next)
@@ -367,10 +380,15 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     }
 
     currentVideo.value = payload.video
+    resolvedPlaybackIdentity.value = {
+      playlistType: payload.playlist_type,
+      playlistVersion: payload.playlist_version,
+      currentIndex: payload.index,
+      videoId: payload.video.id,
+    }
     metadataReady.value = true
     return onPlaybackStateChanged?.()
   }
-
   function syncVideoFromProps(video: Video | null, index: number, hasNextVideo: boolean): Promise<void> {
     return handleVideoChange(video, index, hasNextVideo)
   }

@@ -80,8 +80,12 @@ function handlePlaybackStateChanged() {
   void refreshActivePlayback()
 }
 
-function handlePipClosed() {
-  pipActive.value = false
+async function handlePipOwnershipRegained() {
+  await api.reenterActivePlaybackMetadata()
+}
+
+async function handlePipClosed() {
+  await handlePipOwnershipRegained()
 }
 
 function handleFreshnessCheckError(error: unknown) {
@@ -130,7 +134,6 @@ async function closePip() {
   } catch (e) {
     console.error('Failed to close PiP window:', e)
   }
-  pipActive.value = false
 }
 
 function handleVideoWatched(video: Video) {

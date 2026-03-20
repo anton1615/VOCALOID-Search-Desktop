@@ -113,6 +113,35 @@ fn resolve_playback_enrichment_video(
     }
 }
 
+fn build_active_playback_reentry_request(
+    state: &AppState,
+) -> Option<(VideoSelectedPayload, PlaybackEnrichmentRequest)> {
+    let active_playback = state.active_playback.read();
+    let playback = active_playback.as_ref()?.clone();
+    drop(active_playback);
+
+    let playlist_type = PlaylistType::from(&playback.list_id);
+    let results = state.get_list_context_items(&playback.list_id);
+    let video = results.get(playback.current_index)?.clone();
+    let has_next = playback.current_index + 1 < results.len();
+
+    Some((
+        VideoSelectedPayload {
+            video: video.clone(),
+            index: playback.current_index,
+            has_next,
+            playlist_type,
+            playlist_version: playback.list_version,
+        },
+        build_playback_enrichment_request(
+            playback.list_id,
+            playback.list_version,
+            playback.current_index,
+            video,
+        ),
+    ))
+}
+
 fn parse_duration_seconds(length: Option<&str>) -> Option<i64> {
     let length = length?;
     let parts: Vec<&str> = length.split(':').collect();
@@ -1829,6 +1858,66 @@ pub async fn notify_pip_closing(
     }
     app.emit("pip-closed", ()).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+async fn run_playback_enrichment_reentry(
+    app: &AppHandle,
+    enrichment_request: PlaybackEnrichmentRequest,
+) {
+    let enriched_video = match enrichment_request.kind {
+        PlaybackEnrichmentKind::FetchUserInfo => {
+            let user_info = get_user_info(enrichment_request.video.id.clone())
+                .await
+                .ok()
+                .flatten();
+            resolve_playback_enrichment_video(&enrichment_request, None, user_info)
+        }
+        PlaybackEnrichmentKind::FetchFullVideoInfo => {
+            let full_video = fetch_full_video_info(enrichment_request.video.id.clone())
+                .await
+                .ok();
+            resolve_playback_enrichment_video(&enrichment_request, full_video, None)
+        }
+    };
+
+    let state = app.state::<AppState>();
+    if let Some(payload) = apply_playback_metadata_update(
+        &state,
+        &enrichment_request.list_id,
+        enrichment_request.playlist_version,
+        enrichment_request.index,
+        enriched_video,
+    ) {
+        let _ = app.emit("playback-video-updated", payload);
+    }
+}
+
+fn emit_video_selected_and_spawn_enrichment(
+    app: &AppHandle,
+    selected_payload: VideoSelectedPayload,
+    enrichment_request: PlaybackEnrichmentRequest,
+) -> Result<(), String> {
+    app.emit("video-selected", selected_payload)
+        .map_err(|e| e.to_string())?;
+
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        run_playback_enrichment_reentry(&app_handle, enrichment_request).await;
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reenter_active_playback_metadata(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let Some((selected_payload, enrichment_request)) = build_active_playback_reentry_request(&state) else {
+        return Ok(());
+    };
+
+    emit_video_selected_and_spawn_enrichment(&app, selected_payload, enrichment_request)
 }
 
 #[tauri::command]

@@ -3,9 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Video } from '../api/tauri-commands'
 import {
   getVideoMetaPanelLayout,
+  getVideoMetaPresentationContract,
   observeDescriptionToggleResize,
   shouldShowDescriptionToggle,
   type VideoMetaPanelDisplayMode,
+  type VideoMetaPanelPresentationMode,
 } from '../features/playlistViews/videoMetaPanelLayout'
 import { sanitizeDescriptionHtml } from '../features/playlistViews/videoMetaPanelSanitization'
 import UploaderAvatar from './UploaderAvatar.vue'
@@ -19,6 +21,7 @@ const props = withDefaults(defineProps<{
   expandLabel?: string
   showUploaderPlaceholder?: boolean
   displayMode?: VideoMetaPanelDisplayMode
+  presentationMode?: VideoMetaPanelPresentationMode
 }>(), {
   uploaderName: '',
   uploaderIconUrl: null,
@@ -27,6 +30,7 @@ const props = withDefaults(defineProps<{
   expandLabel: '展開',
   showUploaderPlaceholder: false,
   displayMode: 'full',
+  presentationMode: 'full',
 })
 
 const descriptionExpanded = ref(false)
@@ -39,6 +43,7 @@ const visibleTags = computed(() => props.video.tags?.slice(0, 12) ?? [])
 const remainingTagCount = computed(() => Math.max((props.video.tags?.length ?? 0) - visibleTags.value.length, 0))
 const hasUploader = computed(() => Boolean(props.video.uploader_id || props.video.uploader_name || props.uploaderName))
 const layout = computed(() => getVideoMetaPanelLayout(props.displayMode))
+const presentationContract = computed(() => getVideoMetaPresentationContract(props.presentationMode))
 const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.description ?? ''))
 
 function stopDescriptionResizeObserver() {
@@ -106,7 +111,7 @@ onBeforeUnmount(() => {
 
 async function copyToClipboard() {
   if (!props.video.watch_url || copied.value) return
-  
+
   try {
     await navigator.clipboard.writeText(props.video.watch_url)
     copied.value = true
@@ -117,27 +122,31 @@ async function copyToClipboard() {
     console.error('Failed to copy URL:', err)
   }
 }
-
 </script>
 
 <template>
-  <div class="video-meta-panel">
+  <div
+    class="video-meta-panel"
+    :data-presentation-mode="props.presentationMode"
+    :data-title-clamp="presentationContract.titleClampLines"
+    :data-uploader-clamp="presentationContract.uploaderClampLines"
+  >
     <div v-if="layout.showHeader" class="player-header">
       <div class="header-row">
-        <h1 class="video-title">{{ video.title }}</h1>
+        <h1 class="video-title" :class="[`title-clamp-${presentationContract.titleClampLines}`, `title-frame-${presentationContract.titleClampLines}`]">{{ video.title }}</h1>
         <span class="upload-datetime">{{ uploadDateTime }}</span>
       </div>
-      <div class="meta-row">
+      <div :class="['meta-row', { 'meta-row-emphasized': presentationContract.emphasizedMeta, 'meta-row-fixed-height': presentationContract.fixedMetaRowHeight }]">
         <div v-if="hasUploader" class="uploader-info">
           <UploaderAvatar
             :src="uploaderIconUrl"
             :alt="uploaderName || video.uploader_name || video.uploader_id || 'Uploader avatar'"
-            class="avatar"
+            :class="['avatar', `avatar-${presentationContract.avatarSize}`]"
           />
-          <span class="user-name">{{ uploaderName || video.uploader_name || video.uploader_id }}</span>
+          <span class="user-name" :class="[`uploader-clamp-${presentationContract.uploaderClampLines}`]">{{ uploaderName || video.uploader_name || video.uploader_id }}</span>
         </div>
         <div v-else-if="showUploaderPlaceholder" class="uploader-info-placeholder"></div>
-        <div class="stats">
+        <div :class="['stats', `stats-gap-${presentationContract.statsGap}`, { 'stats-inline-spacing': presentationContract.statsInlineSpacing }]">
           <span class="stat views">▶ {{ video.view_count?.toLocaleString() ?? 0 }}</span>
           <span class="stat likes">❤️ {{ video.like_count?.toLocaleString() ?? 0 }}</span>
           <span class="stat mylists">📝 {{ video.mylist_count?.toLocaleString() ?? 0 }}</span>
@@ -147,7 +156,7 @@ async function copyToClipboard() {
     </div>
 
     <div v-if="layout.showDetails" class="info-below-player">
-      <div v-if="video.watch_url" class="url-section">
+      <div v-if="video.watch_url" :class="['url-section', `url-treatment-${presentationContract.urlTreatment}`]">
         <span class="url-text">{{ video.watch_url }}</span>
         <button class="copy-btn" @click="copyToClipboard">
           {{ copied ? '已複製 ✓' : '📋' }}
@@ -158,6 +167,7 @@ async function copyToClipboard() {
         <span v-for="tag in visibleTags" :key="tag" class="tag">{{ tag }}</span>
         <span v-if="remainingTagCount > 0" class="tag more">+{{ remainingTagCount }}</span>
       </div>
+      <div v-if="presentationContract.showTagDescriptionDivider && visibleTags.length && video.description" class="tag-description-divider"></div>
       <div v-if="video.description" class="description-section">
         <div
           ref="descriptionContentRef"
@@ -199,10 +209,25 @@ async function copyToClipboard() {
   margin: 0;
   line-height: 1.4;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   flex: 1;
+}
+
+.title-clamp-1 {
+  -webkit-line-clamp: 1;
+}
+
+.title-clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
+.title-frame-1 {
+  min-height: calc(1.4em * 1);
+}
+
+.title-frame-2 {
+  min-height: calc(1.4em * 2);
 }
 
 .upload-datetime {
@@ -219,21 +244,40 @@ async function copyToClipboard() {
   gap: var(--space-md);
 }
 
+.meta-row-emphasized :deep(.upload-datetime),
+.meta-row-emphasized :deep(.stat) {
+  font-weight: 700;
+}
+
+.meta-row-fixed-height {
+  min-height: 32px;
+}
+
 .uploader-info {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  min-width: 0;
 }
 
 .avatar {
-  width: 32px;
-  height: 32px;
   border-radius: 50%;
   background: var(--color-bg-hover);
   object-fit: cover;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.avatar-md {
+  width: 32px;
+  height: 32px;
 }
 
 .default-avatar {
@@ -251,9 +295,26 @@ async function copyToClipboard() {
   font-weight: 500;
 }
 
+.uploader-clamp-1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stats {
   display: flex;
+}
+
+.stats-gap-normal {
   gap: var(--space-lg);
+}
+
+.stats-gap-spacious {
+  gap: calc(var(--space-lg) + var(--space-xs));
+}
+
+.stats-inline-spacing {
+  letter-spacing: 0.02em;
 }
 
 .stat {
@@ -292,14 +353,23 @@ async function copyToClipboard() {
   opacity: 0.8;
 }
 
+.tag-description-divider {
+  height: 1px;
+  margin-bottom: var(--space-sm);
+  background: var(--color-border-subtle);
+}
+
 .url-section {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-hover);
   border-radius: 6px;
+}
+
+.url-treatment-surface {
+  background: var(--color-bg-hover);
 }
 
 .url-text {

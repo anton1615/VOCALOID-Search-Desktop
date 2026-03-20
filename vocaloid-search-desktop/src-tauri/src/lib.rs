@@ -163,6 +163,7 @@ pub fn run() {
         commands::open_pip_window,
         commands::close_pip_window,
         commands::notify_pip_closing,
+        commands::reenter_active_playback_metadata,
         commands::select_video,
         commands::play_next,
         commands::play_previous,

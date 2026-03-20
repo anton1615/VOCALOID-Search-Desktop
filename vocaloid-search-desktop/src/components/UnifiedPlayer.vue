@@ -201,14 +201,43 @@ defineExpose({
 
           <template v-else>
             <template v-for="section in layoutSections" :key="section.section">
-              <VideoMetaPanel
-                v-if="metadataReady && (section.section === 'header' || section.section === 'details')"
-                :video="currentVideo"
-                :uploader-name="getUserNickname()"
-                :uploader-icon-url="getUserIconUrl()"
-                :upload-date-time="formatDateTime(currentVideo.start_time)"
-                :display-mode="section.videoMetaPanelMode"
-              />
+              <div
+                v-if="section.section === 'header'"
+                data-shell="header"
+                class="player-shell player-shell-header"
+                :class="{ 'player-shell-pending': !metadataReady, 'player-shell-header-pending-compact': !metadataReady && isCompact }"
+              >
+                <div v-if="!metadataReady && isCompact" class="player-shell-header-frame player-shell-header-frame-compact">
+                  <div class="player-shell-header-frame-title player-shell-header-frame-title-compact"></div>
+                  <div class="player-shell-header-frame-meta player-shell-header-frame-meta-compact"></div>
+                </div>
+                <VideoMetaPanel
+                  v-if="metadataReady"
+                  :video="currentVideo"
+                  :uploader-name="getUserNickname()"
+                  :uploader-icon-url="getUserIconUrl()"
+                  :upload-date-time="formatDateTime(currentVideo.start_time)"
+                  :display-mode="section.videoMetaPanelMode"
+                  :presentation-mode="isCompact ? 'compact' : 'full'"
+                />
+              </div>
+
+              <div
+                v-else-if="section.section === 'details'"
+                data-shell="details"
+                class="player-shell player-shell-details"
+                :class="{ 'player-shell-pending': !metadataReady }"
+              >
+                <VideoMetaPanel
+                  v-if="metadataReady"
+                  :video="currentVideo"
+                  :uploader-name="getUserNickname()"
+                  :uploader-icon-url="getUserIconUrl()"
+                  :upload-date-time="formatDateTime(currentVideo.start_time)"
+                  :display-mode="section.videoMetaPanelMode"
+                  :presentation-mode="isCompact ? 'compact' : 'full'"
+                />
+              </div>
 
               <div v-else-if="section.section === 'player'" class="video-container">
                 <div class="aspect-ratio-box">
@@ -229,17 +258,49 @@ defineExpose({
       <!-- Full mode: standard layout -->
       <template v-else>
         <template v-for="section in layoutSections" :key="section.section">
-          <VideoMetaPanel
-            v-if="currentVideo && metadataReady && (section.section === 'header' || section.section === 'details')"
-            :video="currentVideo"
-            :uploader-name="getUserNickname()"
-            :uploader-icon-url="getUserIconUrl()"
-            :upload-date-time="formatDateTime(currentVideo.start_time)"
-            :collapse-label="t('player.collapse')"
-            :expand-label="t('player.expand')"
-            :show-uploader-placeholder="true"
-            :display-mode="section.videoMetaPanelMode"
-          />
+          <div
+            v-if="currentVideo && section.section === 'header'"
+            data-shell="header"
+            class="player-shell player-shell-header"
+            :class="{ 'player-shell-pending': !metadataReady, 'player-shell-header-pending-full': !metadataReady && !isCompact }"
+          >
+            <div v-if="!metadataReady && !isCompact" class="player-shell-header-frame">
+              <div class="player-shell-header-frame-title"></div>
+              <div class="player-shell-header-frame-meta"></div>
+            </div>
+            <VideoMetaPanel
+              v-if="metadataReady"
+              :video="currentVideo"
+              :uploader-name="getUserNickname()"
+              :uploader-icon-url="getUserIconUrl()"
+              :upload-date-time="formatDateTime(currentVideo.start_time)"
+              :collapse-label="t('player.collapse')"
+              :expand-label="t('player.expand')"
+              :show-uploader-placeholder="true"
+              :display-mode="section.videoMetaPanelMode"
+              :presentation-mode="isCompact ? 'compact' : 'full'"
+            />
+          </div>
+
+          <div
+            v-else-if="currentVideo && section.section === 'details'"
+            data-shell="details"
+            class="player-shell player-shell-details"
+            :class="{ 'player-shell-pending': !metadataReady }"
+          >
+            <VideoMetaPanel
+              v-if="metadataReady"
+              :video="currentVideo"
+              :uploader-name="getUserNickname()"
+              :uploader-icon-url="getUserIconUrl()"
+              :upload-date-time="formatDateTime(currentVideo.start_time)"
+              :collapse-label="t('player.collapse')"
+              :expand-label="t('player.expand')"
+              :show-uploader-placeholder="true"
+              :display-mode="section.videoMetaPanelMode"
+              :presentation-mode="isCompact ? 'compact' : 'full'"
+            />
+          </div>
 
           <!-- Video Container -->
           <div v-else-if="section.section === 'player'" class="video-container">
@@ -340,6 +401,61 @@ defineExpose({
   background: var(--color-bg-surface);
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.player-shell {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.player-shell-header-pending-full {
+  min-height: 86px;
+}
+
+.player-shell-header-pending-compact {
+  min-height: 64px;
+}
+
+.player-shell-header-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.player-shell-header-frame-compact {
+  padding: var(--space-sm) var(--space-md);
+  gap: var(--space-xs);
+}
+
+.player-shell-header-frame-title {
+  min-height: calc(1.4em * 1);
+}
+
+.player-shell-header-frame-title-compact {
+  min-height: calc(1.4em * 2);
+}
+
+.player-shell-header-frame-meta {
+  min-height: 32px;
+}
+
+.player-shell-header-frame-meta-compact {
+  min-height: 24px;
+}
+
+.player-shell-details {
+  min-height: 112px;
+}
+
+.player-shell-pending {
+  background: var(--color-bg-surface);
+}
+
+.player-shell-header-frame-title,
+.player-shell-header-frame-meta {
+  background: transparent;
 }
 
 .empty-state {

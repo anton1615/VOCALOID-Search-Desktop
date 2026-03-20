@@ -64,4 +64,22 @@ describe('PipApp command target handling', () => {
     expect(unifiedPlayerSource).toContain('playlistType: props.playlistType,')
     expect(unifiedPlayerSource).toContain('playlistVersion: props.playlistVersion,')
   })
+
+  test('routes PiP-close ownership regain through a single staged metadata re-entry path', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const tauriApiPath = resolve(__dirname, '../../api/tauri-commands.ts')
+    const source = readFileSync(appPath, 'utf8')
+    const apiSource = readFileSync(tauriApiPath, 'utf8')
+
+    expect(apiSource).toContain("return invoke('reenter_active_playback_metadata')")
+    expect(source).toContain('async function handlePipOwnershipRegained() {')
+    expect(source).toContain('await api.reenterActivePlaybackMetadata()')
+    expect(source).not.toContain('await refreshActivePlayback()\n}')
+    expect(source).toContain('function handlePlaybackStateChanged() {')
+    expect(source).toContain('void refreshActivePlayback()')
+    expect(source).toContain('async function handlePipClosed() {')
+    expect(source).toContain('await handlePipOwnershipRegained()')
+    expect(source).not.toContain('function handlePipClosed() {\n  pipActive.value = false\n}')
+    expect(source).not.toContain('pipActive.value = false')
+  })
 })

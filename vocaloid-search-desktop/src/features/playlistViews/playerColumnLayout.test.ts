@@ -83,6 +83,28 @@ describe('playerColumnLayout', () => {
     expect(playerCoreSource).toContain('metadataReady')
   })
 
+  test('shared player keeps stable header and details shells mounted while metadata is still pending', () => {
+    const playerPath = resolve(__dirname, '../../components/UnifiedPlayer.vue')
+    const playerSource = readFileSync(playerPath, 'utf8')
+
+    expect(playerSource).toContain('data-shell="header"')
+    expect(playerSource).toContain('data-shell="details"')
+    expect(playerSource).not.toContain("v-if=\"metadataReady && (section.section === 'header' || section.section === 'details')\"")
+    expect(playerSource).not.toContain("v-if=\"currentVideo && metadataReady && (section.section === 'header' || section.section === 'details')\"")
+  })
+
+  test('full-mode pending header keeps a reserved title-to-meta frame while compact mode stays flush', () => {
+    const playerPath = resolve(__dirname, '../../components/UnifiedPlayer.vue')
+    const playerSource = readFileSync(playerPath, 'utf8')
+
+    expect(playerSource).toContain("'player-shell-header-pending-full': !metadataReady && !isCompact")
+    expect(playerSource).toContain('class="player-shell-header-frame"')
+    expect(playerSource).toContain('class="player-shell-header-frame-title"')
+    expect(playerSource).toContain('class="player-shell-header-frame-meta"')
+    expect(playerSource).toContain('v-if="!metadataReady && !isCompact"')
+    expect(playerSource).not.toContain('.player-shell-header {\n  min-height: 86px;\n}')
+  })
+
   test('split layout keeps the list pane scrollable after shell extraction', () => {
     const appPath = resolve(__dirname, '../../App.vue')
     const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')

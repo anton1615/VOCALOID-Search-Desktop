@@ -79,7 +79,7 @@ describe('usePlayerCore playback metadata updates', () => {
     expect(player.metadataReady.value).toBe(true)
   })
 
-  test('authoritative props with the same selected identity keep metadata hidden until enrichment arrives', async () => {
+  test('same playback identity can re-enter pending and only matching enrichment makes metadata ready again', async () => {
     const player = usePlayerCore({
       onPlayNext: vi.fn(),
       onMarkWatched: vi.fn(),
@@ -102,9 +102,37 @@ describe('usePlayerCore playback metadata updates', () => {
     }
 
     await capturedEventOptions.onVideoSelected(selectedPayload)
-    await player.handleVideoChange(player.currentVideo.value, selectedPayload.index, selectedPayload.has_next)
-
     expect(player.metadataReady.value).toBe(false)
+
+    await capturedEventOptions.onPlaybackMetadataUpdated({
+      playlist_type: 'History',
+      playlist_version: 4,
+      index: 1,
+      list_id: 'History',
+      video: { id: 'sm9', title: 'updated title' },
+    })
+    expect(player.metadataReady.value).toBe(true)
+
+    await capturedEventOptions.onVideoSelected(selectedPayload)
+    expect(player.metadataReady.value).toBe(false)
+
+    await capturedEventOptions.onPlaybackMetadataUpdated({
+      playlist_type: 'History',
+      playlist_version: 5,
+      index: 1,
+      list_id: 'History',
+      video: { id: 'sm9', title: 'stale title' },
+    })
+    expect(player.metadataReady.value).toBe(false)
+
+    await capturedEventOptions.onPlaybackMetadataUpdated({
+      playlist_type: 'History',
+      playlist_version: 4,
+      index: 1,
+      list_id: 'History',
+      video: { id: 'sm9', title: 'updated again' },
+    })
+    expect(player.metadataReady.value).toBe(true)
   })
 
   test('matching playback metadata updates do not rerun selection reset side effects', async () => {
@@ -219,7 +247,6 @@ describe('usePlayerCore playback metadata updates', () => {
 
     expect(onPlaybackStateChanged).toHaveBeenCalledTimes(1)
   })
-
 
   test('refreshes authoritative playback only for matching playback metadata updates', async () => {
     const onPlaybackStateChanged = vi.fn()

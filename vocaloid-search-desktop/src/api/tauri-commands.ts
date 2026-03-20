@@ -312,6 +312,10 @@ export const api = {
     return invoke('notify_pip_closing')
   },
 
+  reenterActivePlaybackMetadata: async (): Promise<void> => {
+    return invoke('reenter_active_playback_metadata')
+  },
+
   getPlaylistState: async (): Promise<PlaylistState> => {
     return invoke('get_playlist_state')
   },
