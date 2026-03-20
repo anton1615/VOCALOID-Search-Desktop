@@ -229,6 +229,9 @@ mod tests {
 11. **shared player metadata update 契約**：`playback-video-updated` 是獨立於 `video-selected` 的 metadata refresh；前端只在 playlist type / version / index / video id 全匹配時套用，避免重跑 selection-only side effects
 12. **shared player 驗證指令**：改動 staged metadata / player sync 後優先跑 `npx vitest run src/composables/usePlayerCore.test.ts src/composables/usePlayerEvents.test.ts src/features/playlistViews/playerColumnLayout.test.ts && npx vue-tsc --noEmit && npm run build`
 13. **OpenSpec archive 前檢查**：除 `openspec status --change "<name>" --json` 外，也要看 `openspec instructions apply --change "<name>" --json` 與 `tasks.md`；artifact 全 done 時 tasks 仍可能有未勾項目
+14. **description toggle 契約**：`VideoMetaPanel` 的展開按鈕以實際 rendered overflow 決定，不可再用 `video.description.length` 這類固定字數門檻
+15. **description toggle remeasure**：共享 metadata panel 的截斷判斷要在 mount / video 變更後重新量測，且寬度可能變動的情境要靠 `ResizeObserver` 保持主視窗與 PiP 一致
+16. **Vitest + TS callback 陷阱**：在 test 裡經由 constructor 指派到外層變數的 callback 可能被 `vue-tsc` 收斂成不可呼叫；改掛在 class static property 再讀回呼叫較穩定
 
 ## 常見陷阱與已知問題
 

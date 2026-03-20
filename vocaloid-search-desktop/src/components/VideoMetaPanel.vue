@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Video } from '../api/tauri-commands'
 import {
   getVideoMetaPanelLayout,
+  observeDescriptionToggleResize,
+  shouldShowDescriptionToggle,
   type VideoMetaPanelDisplayMode,
 } from '../features/playlistViews/videoMetaPanelLayout'
 import { sanitizeDescriptionHtml } from '../features/playlistViews/videoMetaPanelSanitization'
@@ -28,13 +30,79 @@ const props = withDefaults(defineProps<{
 })
 
 const descriptionExpanded = ref(false)
+const showDescriptionToggle = ref(false)
+const descriptionContentRef = ref<HTMLElement | null>(null)
 const copied = ref(false)
+let stopObservingDescriptionResize: (() => void) | null = null
 
 const visibleTags = computed(() => props.video.tags?.slice(0, 12) ?? [])
 const remainingTagCount = computed(() => Math.max((props.video.tags?.length ?? 0) - visibleTags.value.length, 0))
 const hasUploader = computed(() => Boolean(props.video.uploader_id || props.video.uploader_name || props.uploaderName))
 const layout = computed(() => getVideoMetaPanelLayout(props.displayMode))
 const sanitizedDescription = computed(() => sanitizeDescriptionHtml(props.video.description ?? ''))
+
+function stopDescriptionResizeObserver() {
+  stopObservingDescriptionResize?.()
+  stopObservingDescriptionResize = null
+}
+
+async function updateDescriptionToggle() {
+  if (!layout.value.showDetails) {
+    showDescriptionToggle.value = false
+    return
+  }
+
+  if (descriptionExpanded.value && showDescriptionToggle.value) {
+    return
+  }
+
+  await nextTick()
+
+  const descriptionContent = descriptionContentRef.value
+  if (!descriptionContent) {
+    showDescriptionToggle.value = false
+    return
+  }
+
+  showDescriptionToggle.value = shouldShowDescriptionToggle({
+    scrollHeight: descriptionContent.scrollHeight,
+    clientHeight: descriptionContent.clientHeight,
+  })
+}
+
+async function syncDescriptionToggleObservation() {
+  stopDescriptionResizeObserver()
+
+  if (!layout.value.showDetails) {
+    return
+  }
+
+  await nextTick()
+
+  const descriptionContent = descriptionContentRef.value
+  if (!descriptionContent) {
+    return
+  }
+
+  stopObservingDescriptionResize = observeDescriptionToggleResize(descriptionContent, () => {
+    void updateDescriptionToggle()
+  })
+}
+
+watch(() => [props.video.id, sanitizedDescription.value, props.displayMode], async () => {
+  descriptionExpanded.value = false
+  await updateDescriptionToggle()
+  await syncDescriptionToggleObservation()
+})
+
+onMounted(async () => {
+  await updateDescriptionToggle()
+  await syncDescriptionToggleObservation()
+})
+
+onBeforeUnmount(() => {
+  stopDescriptionResizeObserver()
+})
 
 async function copyToClipboard() {
   if (!props.video.watch_url || copied.value) return
@@ -91,9 +159,14 @@ async function copyToClipboard() {
         <span v-if="remainingTagCount > 0" class="tag more">+{{ remainingTagCount }}</span>
       </div>
       <div v-if="video.description" class="description-section">
-        <div class="description-content" :class="{ collapsed: !descriptionExpanded }" v-html="sanitizedDescription"></div>
+        <div
+          ref="descriptionContentRef"
+          class="description-content"
+          :class="{ collapsed: !descriptionExpanded }"
+          v-html="sanitizedDescription"
+        ></div>
         <button
-          v-if="video.description.length > 200"
+          v-if="showDescriptionToggle"
           class="expand-btn"
           @click="descriptionExpanded = !descriptionExpanded"
         >

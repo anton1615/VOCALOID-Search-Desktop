@@ -53,3 +53,10 @@ nul
 .memory/
 
 .memory/branches/*/log.md
+
+# Local AI agent instructions and scratch files
+AGENTS.md
+CLAUDE.md
+vocaloid-search-desktop/AGENTS.md
+vocaloid-search-desktop/docs/
+AGENTS.md/.pi

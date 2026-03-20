@@ -5,6 +5,35 @@ export type VideoMetaPanelLayout = {
   showDetails: boolean
 }
 
+export function shouldShowDescriptionToggle({
+  scrollHeight,
+  clientHeight,
+}: {
+  scrollHeight: number
+  clientHeight: number
+}): boolean {
+  return scrollHeight > clientHeight
+}
+
+export function observeDescriptionToggleResize(
+  element: HTMLElement,
+  onResize: () => void,
+): () => void {
+  if (typeof ResizeObserver === 'undefined') {
+    return () => {}
+  }
+
+  const observer = new ResizeObserver(() => {
+    onResize()
+  })
+
+  observer.observe(element)
+
+  return () => {
+    observer.disconnect()
+  }
+}
+
 export function getVideoMetaPanelLayout(displayMode: VideoMetaPanelDisplayMode): VideoMetaPanelLayout {
   if (displayMode === 'header') {
     return {
