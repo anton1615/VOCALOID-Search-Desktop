@@ -2,6 +2,8 @@ export type VideoMetaPanelDisplayMode = 'header' | 'details' | 'full'
 
 export type VideoMetaPanelPresentationMode = 'full' | 'compact'
 
+export type CompactHeaderLineState = 'single-line' | 'two-line'
+
 export type VideoMetaPanelLayout = {
   showHeader: boolean
   showDetails: boolean
@@ -17,7 +19,21 @@ export type VideoMetaPresentationContract = {
   showTagDescriptionDivider: boolean
   emphasizedMeta: boolean
   fixedMetaRowHeight: boolean
+  compactHeaderLineState?: CompactHeaderLineState
 }
+
+export type CompactTitleLineMetrics = {
+  titleHeight: number
+  lineHeight: number
+  tolerance?: number
+}
+
+export type CompactTitleContentHeightMetrics = {
+  elementHeight: number
+  minHeight: number
+}
+
+const DEFAULT_COMPACT_TITLE_TOLERANCE = 2
 
 const FULL_MODE_PRESENTATION_CONTRACT: VideoMetaPresentationContract = {
   titleClampLines: 1,
@@ -41,27 +57,49 @@ const COMPACT_MODE_PRESENTATION_CONTRACT: VideoMetaPresentationContract = {
   showTagDescriptionDivider: true,
   emphasizedMeta: false,
   fixedMetaRowHeight: true,
+  compactHeaderLineState: 'two-line',
 }
 
 export function getVideoMetaPresentationContract(
   presentationMode: VideoMetaPanelPresentationMode,
+  compactHeaderLineState: CompactHeaderLineState = 'two-line',
 ): VideoMetaPresentationContract {
-  return presentationMode === 'compact'
-    ? COMPACT_MODE_PRESENTATION_CONTRACT
-    : FULL_MODE_PRESENTATION_CONTRACT
+  if (presentationMode !== 'compact') {
+    return FULL_MODE_PRESENTATION_CONTRACT
+  }
+
+  return {
+    ...COMPACT_MODE_PRESENTATION_CONTRACT,
+    compactHeaderLineState,
+  }
 }
 
-export function shouldShowDescriptionToggle({
-  scrollHeight,
-  clientHeight,
+export function getCompactTitleContentHeight({
+  elementHeight,
+  minHeight,
+}: CompactTitleContentHeightMetrics): number {
+  return Math.max(elementHeight - minHeight, 0)
+}
+
+export function getCompactTitleMeasuredHeight({
+  contentHeight,
+  lineHeight,
 }: {
-  scrollHeight: number
-  clientHeight: number
-}): boolean {
-  return scrollHeight > clientHeight
+  contentHeight: number
+  lineHeight: number
+}): number {
+  return contentHeight + lineHeight
 }
 
-export function observeDescriptionToggleResize(
+export function getCompactTitleLineState({
+  titleHeight,
+  lineHeight,
+  tolerance = DEFAULT_COMPACT_TITLE_TOLERANCE,
+}: CompactTitleLineMetrics): CompactHeaderLineState {
+  return titleHeight <= lineHeight + tolerance ? 'single-line' : 'two-line'
+}
+
+export function observeCompactTitleResize(
   element: HTMLElement,
   onResize: () => void,
 ): () => void {
@@ -78,6 +116,23 @@ export function observeDescriptionToggleResize(
   return () => {
     observer.disconnect()
   }
+}
+
+export function shouldShowDescriptionToggle({
+  scrollHeight,
+  clientHeight,
+}: {
+  scrollHeight: number
+  clientHeight: number
+}): boolean {
+  return scrollHeight > clientHeight
+}
+
+export function observeDescriptionToggleResize(
+  element: HTMLElement,
+  onResize: () => void,
+): () => void {
+  return observeCompactTitleResize(element, onResize)
 }
 
 export function getVideoMetaPanelLayout(displayMode: VideoMetaPanelDisplayMode): VideoMetaPanelLayout {

@@ -145,7 +145,7 @@ onMounted(async () => {
     autoSkip: playerCore.autoSkip.value,
     skipThreshold: playerCore.skipThreshold.value,
   })
-  
+
   // Set up event listeners if needed (for PIP window)
   if (props.setupEvents) {
     eventCleanup = playerCore.setupEventListeners()
