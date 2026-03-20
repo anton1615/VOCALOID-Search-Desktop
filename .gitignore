@@ -11,6 +11,8 @@ vocalsearch-ref/
 
 # OpenSpec files (development tracking)
 openspec/
+docs/
+# legacy docs/plans ignore kept covered by docs/
 docs/plans/
 
 # Opencode config (local settings)
