@@ -1,5 +1,8 @@
 use crate::database::Database;
-use crate::models::{ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress, SearchPlaybackSnapshot, SearchState, Video, WatchLaterState};
+use crate::models::{
+    ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress,
+    SearchPlaybackSnapshot, SearchState, Video, WatchLaterState,
+};
 use async_channel::Sender;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -15,7 +18,8 @@ pub fn should_accept_list_load_more(
     // For Search, accept regardless of active playlist (browsing is independent of playback)
     // For other lists, we only validate version
     let _ = _active_playlist_type; // suppress unused warning
-    requested_playlist_type == crate::models::PlaylistType::Search && current_version == expected_version
+    requested_playlist_type == crate::models::PlaylistType::Search
+        && current_version == expected_version
 }
 
 pub fn should_bump_list_version(current_sort: &str, next_sort: &str) -> bool {
@@ -93,7 +97,6 @@ impl AppState {
         contexts.get(&list_id).cloned().unwrap_or_default()
     }
 
-
     /// Update a list context with new items and browsing state
     /// If page == 1, replaces items, increments version, and updates browsing state
     /// If page > 1, appends items (version and browsing state unchanged)
@@ -113,7 +116,7 @@ impl AppState {
     ) -> u64 {
         let mut contexts = self.list_contexts.write();
         let context = contexts.entry(list_id.clone()).or_default();
-        
+
         if page == 1 {
             // New search - increment version and replace items and browsing state
             context.version += 1;
@@ -134,7 +137,6 @@ impl AppState {
         context.version
     }
 
-
     /// Increment list context version (for sort/filter changes)
     /// Returns the new version
     pub fn bump_list_context_version(&self, list_id: &ListContextId) -> u64 {
@@ -149,13 +151,12 @@ impl AppState {
             1
         }
     }
-    
+
     /// Get the list context for a given list ID
     pub fn get_list_context(&self, list_id: &ListContextId) -> Option<ListContext> {
         let contexts = self.list_contexts.read();
         contexts.get(list_id).cloned()
     }
-
 
     /// Set active playback to a specific list and index
     pub fn set_active_playback(&self, list_id: ListContextId, list_version: u64, index: usize) {
@@ -168,13 +169,31 @@ impl AppState {
         });
     }
 
-    /// Clear active playback
-    pub fn clear_active_playback(&self) {
+    fn clear_active_playback_session(&self) -> Option<ListContextId> {
         let mut playback = self.active_playback.write();
-        *playback = None;
-        // Also clear Search playback snapshot when playback is cleared
+        let cleared_list_id = playback.take().map(|playback| playback.list_id);
+        drop(playback);
+
+        if cleared_list_id.is_none() {
+            return None;
+        }
+
         let mut snapshot = self.search_playback_snapshot.write();
         *snapshot = None;
+        drop(snapshot);
+
+        cleared_list_id
+    }
+
+    /// Clear active playback.
+    /// Returns true when playback was actually cleared.
+    pub fn clear_active_playback(&self) -> bool {
+        self.clear_active_playback_session().is_some()
+    }
+
+    /// Clear active playback and return the cleared playback list when present.
+    pub fn clear_active_playback_with_list(&self) -> Option<ListContextId> {
+        self.clear_active_playback_session()
     }
 
     /// Clear active playback if it belongs to the specified list.
@@ -220,7 +239,10 @@ impl AppState {
     }
 
     /// Get the current Search playback snapshot if valid for the given version
-    pub fn get_search_playback_snapshot(&self, list_version: u64) -> Option<SearchPlaybackSnapshot> {
+    pub fn get_search_playback_snapshot(
+        &self,
+        list_version: u64,
+    ) -> Option<SearchPlaybackSnapshot> {
         let snapshot = self.search_playback_snapshot.read();
         match *snapshot {
             Some(ref s) if s.list_version == list_version => Some(s.clone()),
@@ -235,7 +257,12 @@ impl AppState {
     }
     /// Update list context pagination state after load_more
     /// This only updates page and has_next, does not modify items or version
-    pub fn update_list_context_pagination(&self, list_id: &ListContextId, page: usize, has_next: bool) {
+    pub fn update_list_context_pagination(
+        &self,
+        list_id: &ListContextId,
+        page: usize,
+        has_next: bool,
+    ) {
         let mut contexts = self.list_contexts.write();
         if let Some(context) = contexts.get_mut(list_id) {
             context.page = page;
@@ -334,8 +361,6 @@ impl AppState {
         context.version
     }
 
-
-
     /// Update active playback index
     pub fn set_active_playback_index(&self, index: usize) {
         let mut playback = self.active_playback.write();
@@ -353,12 +378,20 @@ impl AppState {
     /// Get list context items
     pub fn get_list_context_items(&self, list_id: &ListContextId) -> Vec<Video> {
         let contexts = self.list_contexts.read();
-        contexts.get(list_id).map(|c| c.items.clone()).unwrap_or_default()
+        contexts
+            .get(list_id)
+            .map(|c| c.items.clone())
+            .unwrap_or_default()
     }
 
     /// Update a single video in a list context
     /// Returns true if successful, false if index out of bounds or context not found
-    pub fn update_list_context_item(&self, list_id: &ListContextId, index: usize, video: Video) -> bool {
+    pub fn update_list_context_item(
+        &self,
+        list_id: &ListContextId,
+        index: usize,
+        video: Video,
+    ) -> bool {
         let mut contexts = self.list_contexts.write();
         if let Some(context) = contexts.get_mut(list_id) {
             if index < context.items.len() {
@@ -419,8 +452,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        should_accept_list_load_more,
-        should_bump_list_version,
+        should_accept_list_load_more, should_bump_list_version,
         should_reset_playback_for_list_change,
     };
 
@@ -480,7 +512,8 @@ mod tests {
     fn switching_browsing_list_preserves_existing_active_playback_binding() {
         let test = TestAppState::new();
         let search_version = test.state.get_list_context_version(&ListContextId::Search);
-        test.state.set_active_playback(ListContextId::Search, search_version, 2);
+        test.state
+            .set_active_playback(ListContextId::Search, search_version, 2);
 
         test.state.set_browsing_list(ListContextId::History);
 
@@ -519,11 +552,17 @@ mod tests {
     fn clear_active_playback_for_list_reports_false_for_non_active_list() {
         let test = TestAppState::new();
         let search_version = test.state.get_list_context_version(&ListContextId::Search);
-        test.state.set_active_playback(ListContextId::Search, search_version, 1);
+        test.state
+            .set_active_playback(ListContextId::Search, search_version, 1);
 
-        let cleared = test.state.clear_active_playback_for_list(&ListContextId::History);
+        let cleared = test
+            .state
+            .clear_active_playback_for_list(&ListContextId::History);
 
-        assert!(!cleared, "non-active list refreshes must not report playback cleared");
+        assert!(
+            !cleared,
+            "non-active list refreshes must not report playback cleared"
+        );
         let playback = test.state.active_playback.read().clone();
         assert_eq!(
             playback.as_ref().map(|p| &p.list_id),
@@ -536,14 +575,120 @@ mod tests {
     fn clear_active_playback_for_list_reports_true_for_active_list() {
         let test = TestAppState::new();
         let history_version = test.state.get_list_context_version(&ListContextId::History);
-        test.state.set_active_playback(ListContextId::History, history_version, 0);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 0);
 
-        let cleared = test.state.clear_active_playback_for_list(&ListContextId::History);
+        let cleared = test
+            .state
+            .clear_active_playback_for_list(&ListContextId::History);
 
-        assert!(cleared, "active list invalidation must report playback cleared");
+        assert!(
+            cleared,
+            "active list invalidation must report playback cleared"
+        );
         assert!(
             test.state.active_playback.read().is_none(),
             "active list invalidation must clear playback"
+        );
+    }
+
+    #[test]
+    fn sync_route_reset_clears_playback_without_touching_browsing_contexts() {
+        let test = TestAppState::new();
+
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![sample_video("sm9")],
+            1,
+            50,
+            true,
+            99,
+            "miku".to_string(),
+            None,
+            None,
+            true,
+            None,
+        );
+        test.state
+            .update_list_context_pagination(&ListContextId::Search, 3, true);
+        test.state.set_browsing_list(ListContextId::History);
+        {
+            let mut search_state = test.state.search_state.write();
+            search_state.query = "miku".to_string();
+            search_state.page = 3;
+            search_state.has_next = true;
+            search_state.total_count = 99;
+            search_state.results = vec![sample_video("sm9")];
+        }
+        test.state.history_state.write().page = 2;
+        test.state.watch_later_state.write().page = 4;
+
+        let search_version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state
+            .create_or_reuse_search_playback_snapshot(search_version, 42);
+        test.state
+            .set_active_playback(ListContextId::Search, search_version, 0);
+
+        let cleared = test.state.clear_active_playback();
+
+        assert!(
+            cleared,
+            "sync-route reset should report when playback was terminated"
+        );
+        assert!(test.state.active_playback.read().is_none());
+        assert!(test.state.search_playback_snapshot.read().is_none());
+        assert_eq!(test.state.get_browsing_list(), ListContextId::History);
+
+        let search_context = test.state.get_list_context(&ListContextId::Search).unwrap();
+        assert_eq!(search_context.query, "miku");
+        assert_eq!(search_context.page, 3);
+        assert_eq!(search_context.total_count, 99);
+        assert_eq!(search_context.items.len(), 1);
+
+        assert_eq!(test.state.search_state.read().query, "miku");
+        assert_eq!(test.state.search_state.read().page, 3);
+        assert_eq!(test.state.history_state.read().page, 2);
+        assert_eq!(test.state.watch_later_state.read().page, 4);
+    }
+
+    #[test]
+    fn sync_route_reset_without_active_playback_still_invalidates_search_snapshot() {
+        let test = TestAppState::new();
+
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![sample_video("sm9")],
+            1,
+            50,
+            true,
+            1,
+            "miku".to_string(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let search_version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state
+            .create_or_reuse_search_playback_snapshot(search_version, 7);
+        test.state.set_active_playback(ListContextId::History, 1, 0);
+
+        let history_cleared = test
+            .state
+            .clear_active_playback_for_list(&ListContextId::History);
+
+        assert!(history_cleared);
+        assert!(test.state.active_playback.read().is_none());
+        assert!(
+            test.state.search_playback_snapshot.read().is_some(),
+            "search snapshot can remain when a non-search playback session is cleared"
+        );
+
+        test.state.invalidate_search_playback_snapshot();
+
+        assert!(
+            test.state.search_playback_snapshot.read().is_none(),
+            "sync-route reset must invalidate any remaining search snapshot even without active playback"
         );
     }
 
@@ -568,10 +713,7 @@ mod tests {
             let user_data_path = root.join("user_data.db");
             crate::database::init_db(&videos_path, &user_data_path).unwrap();
             let state = AppState::new(videos_path, user_data_path);
-            Self {
-                state,
-                _root: root,
-            }
+            Self { state, _root: root }
         }
     }
 
@@ -599,11 +741,16 @@ mod tests {
         );
         let version = test.state.get_list_context_version(&ListContextId::Search);
 
-        let created = test.state.create_or_reuse_search_playback_snapshot(version, 42);
+        let created = test
+            .state
+            .create_or_reuse_search_playback_snapshot(version, 42);
         assert!(created, "should return true when creating new snapshot");
 
         let snapshot = test.state.get_search_playback_snapshot(version);
-        assert!(snapshot.is_some(), "snapshot should exist for matching version");
+        assert!(
+            snapshot.is_some(),
+            "snapshot should exist for matching version"
+        );
         let s = snapshot.unwrap();
         assert_eq!(s.frozen_watched_boundary_seq, 42);
         assert_eq!(s.list_version, version);
@@ -627,12 +774,21 @@ mod tests {
         );
         let version = test.state.get_list_context_version(&ListContextId::Search);
 
-        test.state.create_or_reuse_search_playback_snapshot(version, 10);
-        let reused = test.state.create_or_reuse_search_playback_snapshot(version, 20);
-        assert!(!reused, "should return false when reusing existing snapshot");
+        test.state
+            .create_or_reuse_search_playback_snapshot(version, 10);
+        let reused = test
+            .state
+            .create_or_reuse_search_playback_snapshot(version, 20);
+        assert!(
+            !reused,
+            "should return false when reusing existing snapshot"
+        );
 
         let snapshot = test.state.get_search_playback_snapshot(version).unwrap();
-        assert_eq!(snapshot.frozen_watched_boundary_seq, 10, "should keep original frozen boundary");
+        assert_eq!(
+            snapshot.frozen_watched_boundary_seq, 10,
+            "should keep original frozen boundary"
+        );
     }
 
     #[test]
@@ -652,7 +808,8 @@ mod tests {
             None,
         );
         let version = test.state.get_list_context_version(&ListContextId::Search);
-        test.state.create_or_reuse_search_playback_snapshot(version, 5);
+        test.state
+            .create_or_reuse_search_playback_snapshot(version, 5);
 
         test.state.invalidate_search_playback_snapshot();
 
@@ -677,13 +834,19 @@ mod tests {
             None,
         );
         let version = test.state.get_list_context_version(&ListContextId::Search);
-        test.state.create_or_reuse_search_playback_snapshot(version, 5);
-        test.state.set_active_playback(ListContextId::Search, version, 0);
+        test.state
+            .create_or_reuse_search_playback_snapshot(version, 5);
+        test.state
+            .set_active_playback(ListContextId::Search, version, 0);
 
-        test.state.clear_active_playback_for_list(&ListContextId::Search);
+        test.state
+            .clear_active_playback_for_list(&ListContextId::Search);
 
         let snapshot = test.state.search_playback_snapshot.read();
-        assert!(snapshot.is_none(), "snapshot should be cleared when Search playback is cleared");
+        assert!(
+            snapshot.is_none(),
+            "snapshot should be cleared when Search playback is cleared"
+        );
     }
 
     #[test]
@@ -703,19 +866,28 @@ mod tests {
             None,
         );
         let version = test.state.get_list_context_version(&ListContextId::Search);
-        test.state.create_or_reuse_search_playback_snapshot(version, 5);
+        test.state
+            .create_or_reuse_search_playback_snapshot(version, 5);
         test.state.set_active_playback(ListContextId::History, 1, 0);
 
-        test.state.clear_active_playback_for_list(&ListContextId::History);
+        test.state
+            .clear_active_playback_for_list(&ListContextId::History);
 
         let snapshot = test.state.search_playback_snapshot.read();
-        assert!(snapshot.is_some(), "Search snapshot should remain when History playback is cleared");
+        assert!(
+            snapshot.is_some(),
+            "Search snapshot should remain when History playback is cleared"
+        );
     }
 
     #[test]
     fn playback_metadata_update_matches_active_playback_identity() {
         let test = TestAppState::new();
-        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        let history_items = vec![
+            sample_video("sm1"),
+            sample_video("sm2"),
+            sample_video("sm9"),
+        ];
         test.state.update_list_context(
             ListContextId::History,
             history_items,
@@ -745,7 +917,11 @@ mod tests {
     #[test]
     fn playback_metadata_update_rejects_stale_identity() {
         let test = TestAppState::new();
-        let history_items = vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm9")];
+        let history_items = vec![
+            sample_video("sm1"),
+            sample_video("sm2"),
+            sample_video("sm9"),
+        ];
         test.state.update_list_context(
             ListContextId::History,
             history_items,

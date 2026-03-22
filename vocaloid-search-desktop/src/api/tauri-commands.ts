@@ -316,6 +316,10 @@ export const api = {
     return invoke('reenter_active_playback_metadata')
   },
 
+  resetPlaybackForSyncRouteEntry: async (): Promise<void> => {
+    return invoke('reset_playback_for_sync_route_entry')
+  },
+
   getPlaylistState: async (): Promise<PlaylistState> => {
     return invoke('get_playlist_state')
   },

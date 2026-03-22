@@ -195,6 +195,7 @@ pub fn run() {
         commands::get_watch_later_state,
         commands::set_watch_later_state,
         commands::set_playlist_type,
+        commands::reset_playback_for_sync_route_entry,
         // Video info fetching
         commands::fetch_full_video_info,
     ])

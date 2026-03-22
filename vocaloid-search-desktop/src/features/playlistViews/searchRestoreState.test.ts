@@ -161,4 +161,57 @@ describe('resolveSearchRestoreState', () => {
     expect(restored.currentVideo).toBeNull()
     expect(restored.currentVideoIndex).toBe(-1)
   })
+
+  test('restores saved search browsing state after sync-route playback reset without rerunning initial search', () => {
+    const searchResults = [baseVideo, { ...baseVideo, id: 'sm10' }]
+
+    const restored = resolveSearchRestoreState({
+      ...emptyPlaylistState,
+      results: [],
+      index: null,
+      playlist_type: 'Search',
+      playlist_version: 0,
+      pip_active: true,
+    }, {
+      ...baseSearchState,
+      version: 4,
+      page: 3,
+      has_next: true,
+      total_count: 2,
+      results: searchResults,
+    } as SearchState & { results: Video[] })
+
+    expect(restored.shouldRunInitialSearch).toBe(false)
+    expect(restored.results).toEqual(searchResults)
+    expect(restored.currentVideo).toBeNull()
+    expect(restored.currentVideoIndex).toBe(-1)
+    expect(restored.hasNext).toBe(true)
+    expect(restored.totalCount).toBe(2)
+    expect(restored.page).toBe(3)
+    expect(restored.pipActive).toBe(true)
+  })
+
+  test('restores an empty saved search result state after sync-route reset without rerunning initial search', () => {
+    const restored = resolveSearchRestoreState({
+      ...emptyPlaylistState,
+      results: [],
+      index: null,
+      playlist_type: 'Search',
+      playlist_version: 0,
+      pip_active: false,
+    }, {
+      ...baseSearchState,
+      version: 4,
+      page: 2,
+      has_next: false,
+      total_count: 0,
+      results: [],
+    } as SearchState & { results: Video[] })
+
+    expect(restored.shouldRunInitialSearch).toBe(false)
+    expect(restored.results).toEqual([])
+    expect(restored.currentVideo).toBeNull()
+    expect(restored.currentVideoIndex).toBe(-1)
+    expect(restored.page).toBe(2)
+  })
 })

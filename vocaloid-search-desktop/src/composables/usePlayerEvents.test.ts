@@ -95,4 +95,22 @@ describe('usePlayerEvents', () => {
     expect(onPlaybackMetadataUpdated).toHaveBeenCalledWith(payload)
     expect(onVideoSelected).not.toHaveBeenCalled()
   })
+
+  test('forwards active-playback-cleared events to the shared cleared handler', async () => {
+    const onActivePlaybackCleared = vi.fn()
+
+    const events = usePlayerEvents({
+      onVideoSelected: vi.fn(),
+      onPlaybackMetadataUpdated: vi.fn(),
+      onPlaybackSettingsChanged: vi.fn(),
+      onVideoWatched: vi.fn(),
+      onActivePlaybackCleared,
+    })
+
+    events.setupEventListeners()
+
+    await listeners.get('active-playback-cleared')?.({ payload: 'Search' })
+
+    expect(onActivePlaybackCleared).toHaveBeenCalledTimes(1)
+  })
 })

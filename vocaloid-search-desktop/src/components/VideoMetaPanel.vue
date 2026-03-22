@@ -203,6 +203,8 @@ async function copyToClipboard() {
     :data-presentation-mode="props.presentationMode"
     :data-title-clamp="presentationContract.titleClampLines"
     :data-uploader-clamp="presentationContract.uploaderClampLines"
+    :data-stats-inline-priority="presentationContract.statsFirstInlinePriority ? 'stats-first' : undefined"
+    :data-uploader-priority="presentationContract.uploaderTruncatesBeforeStats ? 'truncate-first' : undefined"
     :data-compact-header-line-state="props.presentationMode === 'compact' ? compactHeaderLineState : undefined"
   >
     <div v-if="layout.showHeader" class="player-header">
@@ -331,6 +333,11 @@ async function copyToClipboard() {
   gap: var(--space-xs);
 }
 
+.video-meta-panel[data-presentation-mode='compact'][data-uploader-priority='truncate-first'] .uploader-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .video-meta-panel[data-presentation-mode='compact'].video-meta-panel :deep(.avatar-sm),
 .video-meta-panel[data-presentation-mode='compact'] .avatar-sm {
   width: 20px;
@@ -342,9 +349,31 @@ async function copyToClipboard() {
   line-height: 1.2;
 }
 
+.video-meta-panel[data-presentation-mode='compact'][data-uploader-priority='truncate-first'] .user-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .video-meta-panel[data-presentation-mode='compact'].video-meta-panel :deep(.stat),
 .video-meta-panel[data-presentation-mode='compact'] .stat {
   line-height: 1.2;
+}
+
+.video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stat {
+  white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-spacious {
+    gap: var(--space-md);
+  }
 }
 
 .video-meta-panel[data-presentation-mode='compact'].video-meta-panel :deep(.upload-datetime),

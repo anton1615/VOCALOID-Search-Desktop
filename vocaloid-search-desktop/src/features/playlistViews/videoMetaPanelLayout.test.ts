@@ -39,6 +39,8 @@ describe('videoMetaPanelLayout', () => {
       avatarSize: 'md',
       statsGap: 'normal',
       statsInlineSpacing: false,
+      statsFirstInlinePriority: false,
+      uploaderTruncatesBeforeStats: false,
       urlTreatment: 'surface',
       showTagDescriptionDivider: true,
       emphasizedMeta: true,
@@ -53,6 +55,8 @@ describe('videoMetaPanelLayout', () => {
       avatarSize: 'sm',
       statsGap: 'spacious',
       statsInlineSpacing: true,
+      statsFirstInlinePriority: true,
+      uploaderTruncatesBeforeStats: true,
       urlTreatment: 'surface',
       showTagDescriptionDivider: true,
       emphasizedMeta: false,
@@ -68,6 +72,8 @@ describe('videoMetaPanelLayout', () => {
       avatarSize: 'sm',
       statsGap: 'spacious',
       statsInlineSpacing: true,
+      statsFirstInlinePriority: true,
+      uploaderTruncatesBeforeStats: true,
       urlTreatment: 'surface',
       showTagDescriptionDivider: true,
       emphasizedMeta: false,
@@ -294,6 +300,8 @@ describe('videoMetaPanelLayout', () => {
     expect(source).toContain(':data-presentation-mode="props.presentationMode"')
     expect(source).toContain(':data-title-clamp="presentationContract.titleClampLines"')
     expect(source).toContain(':data-uploader-clamp="presentationContract.uploaderClampLines"')
+    expect(source).toContain(':data-stats-inline-priority="presentationContract.statsFirstInlinePriority ? \'stats-first\' : undefined"')
+    expect(source).toContain(':data-uploader-priority="presentationContract.uploaderTruncatesBeforeStats ? \'truncate-first\' : undefined"')
     expect(source).toContain('title-clamp-${presentationContract.titleClampLines}')
     expect(source).toContain('title-frame-${presentationContract.titleClampLines}')
     expect(source).toContain(':class="[`uploader-clamp-${presentationContract.uploaderClampLines}`]"')
@@ -419,6 +427,35 @@ describe('videoMetaPanelLayout', () => {
     expect(source).toContain('.avatar-sm')
     expect(source).toContain('.stats-gap-spacious')
     expect(source).toContain('.stats-inline-spacing')
+  })
+
+  test('PiP compact contract exposes stats-first inline priority and uploader-first truncation markers', () => {
+    const videoMetaPanelPath = resolve(__dirname, '../../components/VideoMetaPanel.vue')
+    const source = readFileSync(videoMetaPanelPath, 'utf8')
+
+    expect(source).toContain('data-stats-inline-priority')
+    expect(source).toContain('data-uploader-priority')
+    expect(source).toContain("'stats-first'")
+    expect(source).toContain("'truncate-first'")
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats")
+    expect(source).toContain('flex-wrap: nowrap;')
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-uploader-priority='truncate-first'] .uploader-info")
+    expect(source).toContain('flex: 1 1 auto;')
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-uploader-priority='truncate-first'] .user-name")
+    expect(source).toContain('min-width: 0;')
+    expect(source).toContain('overflow: hidden;')
+    expect(source).toContain('text-overflow: ellipsis;')
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stat")
+    expect(source).toContain('white-space: nowrap;')
+  })
+
+  test('PiP compact stats-first contract reduces stat gap under narrow widths before risking overflow', () => {
+    const videoMetaPanelPath = resolve(__dirname, '../../components/VideoMetaPanel.vue')
+    const source = readFileSync(videoMetaPanelPath, 'utf8')
+
+    expect(source).toContain("@media (max-width: 420px)")
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-spacious")
+    expect(source).toContain('gap: var(--space-md);')
   })
 
   test('PiP pending header keeps a compact frame without falling back to the full-mode shell reservation', () => {

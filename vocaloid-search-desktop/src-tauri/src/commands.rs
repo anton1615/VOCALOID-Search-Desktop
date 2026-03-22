@@ -53,6 +53,18 @@ fn apply_playback_metadata_update(
     build_playback_metadata_update_payload(state, list_id, playlist_version, index, video)
 }
 
+fn emit_active_playback_cleared(app: &AppHandle, list_id: &ListContextId) -> Result<(), String> {
+    let payload = match list_id {
+        ListContextId::Search => "Search",
+        ListContextId::History => "History",
+        ListContextId::WatchLater => "WatchLater",
+        ListContextId::Custom(name) => name.as_str(),
+    };
+
+    app.emit("active-playback-cleared", payload)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlaybackEnrichmentKind {
     FetchFullVideoInfo,
@@ -1151,7 +1163,7 @@ pub async fn search(
         // Invalidate Search playback snapshot when Search conditions change
         state.invalidate_search_playback_snapshot();
         if playback_cleared {
-            app.emit("active-playback-cleared", "Search").map_err(|e| e.to_string())?;
+            emit_active_playback_cleared(&app, &ListContextId::Search)?;
         }
     } else {
         // Update pagination state for subsequent pages
@@ -1472,7 +1484,7 @@ pub async fn get_history(
             drop(contexts);
             let playback_cleared = state.clear_active_playback_for_list(&ListContextId::History);
             if playback_cleared {
-                app.emit("active-playback-cleared", "History").map_err(|e| e.to_string())?;
+                emit_active_playback_cleared(&app, &ListContextId::History)?;
             }
             contexts = state.list_contexts.write();
         }
@@ -2180,7 +2192,7 @@ pub async fn get_watch_later(
             drop(contexts);
             let playback_cleared = state.clear_active_playback_for_list(&ListContextId::WatchLater);
             if playback_cleared {
-                app.emit("active-playback-cleared", "WatchLater").map_err(|e| e.to_string())?;
+                emit_active_playback_cleared(&app, &ListContextId::WatchLater)?;
             }
             contexts = state.list_contexts.write();
         }
@@ -2303,6 +2315,20 @@ pub async fn set_playlist_type(
     // Set the browsing list (creates/updates active_playback)
     let list_id = ListContextId::from(playlist_type);
     state.set_browsing_list(list_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reset_playback_for_sync_route_entry(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.invalidate_search_playback_snapshot();
+
+    if let Some(cleared_list_id) = state.clear_active_playback_with_list() {
+        emit_active_playback_cleared(&app, &cleared_list_id)?;
+    }
+
     Ok(())
 }
 

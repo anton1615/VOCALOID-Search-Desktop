@@ -48,6 +48,17 @@ watch(() => localeStore.locale, (newLocale) => {
   i18n.global.locale.value = newLocale
 })
 
+watch(() => route.name, async (routeName, previousRouteName) => {
+  if (routeName === 'scraper' && previousRouteName !== 'scraper') {
+    try {
+      await api.resetPlaybackForSyncRouteEntry()
+      await refreshActivePlayback()
+    } catch (error) {
+      console.error('Failed to reset playback on sync route entry:', error)
+    }
+  }
+})
+
 const showsSplitLayout = computed(() => route.name !== 'scraper')
 
 async function syncActivePlayback(state: {

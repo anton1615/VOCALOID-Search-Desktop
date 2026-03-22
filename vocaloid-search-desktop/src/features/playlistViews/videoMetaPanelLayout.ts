@@ -15,6 +15,8 @@ export type VideoMetaPresentationContract = {
   avatarSize: 'sm' | 'md'
   statsGap: 'normal' | 'spacious'
   statsInlineSpacing: boolean
+  statsFirstInlinePriority: boolean
+  uploaderTruncatesBeforeStats: boolean
   urlTreatment: 'surface'
   showTagDescriptionDivider: boolean
   emphasizedMeta: boolean
@@ -41,6 +43,8 @@ const FULL_MODE_PRESENTATION_CONTRACT: VideoMetaPresentationContract = {
   avatarSize: 'md',
   statsGap: 'normal',
   statsInlineSpacing: false,
+  statsFirstInlinePriority: false,
+  uploaderTruncatesBeforeStats: false,
   urlTreatment: 'surface',
   showTagDescriptionDivider: true,
   emphasizedMeta: true,
@@ -53,6 +57,8 @@ const COMPACT_MODE_PRESENTATION_CONTRACT: VideoMetaPresentationContract = {
   avatarSize: 'sm',
   statsGap: 'spacious',
   statsInlineSpacing: true,
+  statsFirstInlinePriority: true,
+  uploaderTruncatesBeforeStats: true,
   urlTreatment: 'surface',
   showTagDescriptionDivider: true,
   emphasizedMeta: false,

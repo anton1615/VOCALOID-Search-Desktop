@@ -144,4 +144,34 @@ describe('playlistViewState shared logic', () => {
     expect(historySource).not.toContain("onMounted(async () => {\n  await api.setPlaylistType('History')")
     expect(watchLaterSource).not.toContain("onMounted(async () => {\n  await api.setPlaylistType('WatchLater')")
   })
+
+  test('sync-route playback reset does not revive stale History selection on return', () => {
+    const results = [baseVideo, { ...baseVideo, id: 'sm10' }]
+
+    expect(
+      getInitialPlaylistViewState({
+        expectedPlaylistType: 'History',
+        expectedPlaylistVersion: 3,
+        playlistType: 'Search',
+        playlistVersion: 1,
+        playlistIndex: -1,
+        results,
+      })
+    ).toEqual({ selectedIndex: -1, selectedVideo: null })
+  })
+
+  test('sync-route playback reset does not revive stale Watch Later selection on return', () => {
+    const results = [baseVideo, { ...baseVideo, id: 'sm10' }]
+
+    expect(
+      getInitialPlaylistViewState({
+        expectedPlaylistType: 'WatchLater',
+        expectedPlaylistVersion: 5,
+        playlistType: 'Search',
+        playlistVersion: 1,
+        playlistIndex: -1,
+        results,
+      })
+    ).toEqual({ selectedIndex: -1, selectedVideo: null })
+  })
 })

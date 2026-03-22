@@ -15,7 +15,18 @@ export function resolveSearchRestoreState(
   playlistState: PlaylistState,
   searchState: SearchState
 ): SearchRestoreSnapshot {
-  if (playlistState.results.length === 0) {
+  const savedBrowsingResults = searchState.results ?? []
+  const hasSavedBrowsingState = savedBrowsingResults.length > 0
+    || searchState.version > 0
+    || searchState.page > 1
+    || searchState.total_count > 0
+    || searchState.query.length > 0
+    || searchState.exclude_watched
+    || Boolean(searchState.sort)
+    || Boolean(searchState.filters)
+    || Boolean(searchState.formula_filter)
+
+  if (playlistState.results.length === 0 && !hasSavedBrowsingState) {
     return {
       shouldRunInitialSearch: true,
       results: [],
@@ -40,7 +51,7 @@ export function resolveSearchRestoreState(
 
   const browsingResults = hasActiveSearchPlayback
     ? playlistState.results
-    : searchState.results ?? []
+    : savedBrowsingResults
 
   return {
     shouldRunInitialSearch: false,

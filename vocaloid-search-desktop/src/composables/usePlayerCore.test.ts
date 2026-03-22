@@ -284,4 +284,47 @@ describe('usePlayerCore playback metadata updates', () => {
 
     expect(onPlaybackStateChanged).toHaveBeenCalledTimes(1)
   })
+
+  test('active-playback-cleared resets local player state and triggers authoritative refresh', async () => {
+    const onPlaybackStateChanged = vi.fn()
+    const onStateCleared = vi.fn()
+
+    const player = usePlayerCore({
+      onPlayNext: vi.fn(),
+      onMarkWatched: vi.fn(),
+      onPlaybackStateChanged,
+      onStateCleared,
+      setupEvents: true,
+      getPlaybackIdentity: () => ({
+        playlistType: 'Search',
+        playlistVersion: 4,
+        currentIndex: 1,
+        videoId: 'sm9',
+      }),
+    })
+
+    await capturedEventOptions.onVideoSelected({
+      playlist_type: 'Search',
+      playlist_version: 4,
+      index: 1,
+      has_next: true,
+      video: { id: 'sm9', title: 'selected title' },
+    })
+
+    player.playerReady.value = true
+    player.isPlaying.value = true
+    player.metadataReady.value = true
+    onPlaybackStateChanged.mockClear()
+
+    await capturedEventOptions.onActivePlaybackCleared()
+
+    expect(player.currentVideo.value).toBeNull()
+    expect(player.currentIndex.value).toBe(-1)
+    expect(player.hasNext.value).toBe(false)
+    expect(player.playerReady.value).toBe(false)
+    expect(player.isPlaying.value).toBe(false)
+    expect(player.metadataReady.value).toBe(false)
+    expect(onStateCleared).toHaveBeenCalledTimes(1)
+    expect(onPlaybackStateChanged).toHaveBeenCalledTimes(1)
+  })
 })

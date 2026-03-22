@@ -60,4 +60,29 @@ describe('scraper sync flow', () => {
     expect(source).toContain("t('scraper.insufficientStorageTitle')")
     expect(source).toContain('v-if="!isStorageInsufficient"')
   })
+
+  test('treats entering /scraper as a route-entry playback reset boundary', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const apiPath = resolve(__dirname, '../../api/tauri-commands.ts')
+    const source = readFileSync(appPath, 'utf8')
+    const apiSource = readFileSync(apiPath, 'utf8')
+
+    expect(source).toContain("watch(() => route.name")
+    expect(source).toContain("routeName === 'scraper'")
+    expect(source).toContain('await api.resetPlaybackForSyncRouteEntry()')
+    expect(source).toContain('await refreshActivePlayback()')
+    expect(apiSource).toContain('resetPlaybackForSyncRouteEntry: async (): Promise<void> =>')
+    expect(apiSource).toContain("return invoke('reset_playback_for_sync_route_entry')")
+  })
+
+  test('guards sync-route playback reset watcher with error handling', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const source = readFileSync(appPath, 'utf8')
+
+    expect(source).toContain("watch(() => route.name, async (routeName, previousRouteName) => {")
+    expect(source).toContain('try {')
+    expect(source).toContain('await api.resetPlaybackForSyncRouteEntry()')
+    expect(source).toContain('await refreshActivePlayback()')
+    expect(source).toContain("console.error('Failed to reset playback on sync route entry:'")
+  })
 })
