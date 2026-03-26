@@ -20,6 +20,9 @@ const loadingMore = ref(false)
 
 const currentVideo = ref<Video | null>(null)
 const currentVideoIndex = ref(-1)
+const showRemoveConfirm = ref(false)
+const pendingRemovalVideo = ref<Video | null>(null)
+const removing = ref(false)
 
 // Filtering
 const searchQuery = ref('')
@@ -116,6 +119,32 @@ async function removeFromList(videoId: string) {
     }
   } catch (e) {
     console.error('Failed to remove from watch later:', e)
+  }
+}
+
+function promptRemove(video: Video) {
+  pendingRemovalVideo.value = video
+  showRemoveConfirm.value = true
+}
+
+function cancelRemove() {
+  if (removing.value) return
+
+  showRemoveConfirm.value = false
+  pendingRemovalVideo.value = null
+}
+
+async function confirmRemove() {
+  if (!pendingRemovalVideo.value || removing.value) return
+
+  removing.value = true
+
+  try {
+    await removeFromList(pendingRemovalVideo.value.id)
+    showRemoveConfirm.value = false
+    pendingRemovalVideo.value = null
+  } finally {
+    removing.value = false
   }
 }
 
@@ -302,7 +331,7 @@ function toggleSortOrder() {
           </div>
           
           <div class="actions">
-            <button class="remove-btn" @click="removeFromList(video.id)" :title="t('watchLater.remove')">
+            <button class="remove-btn" @click="promptRemove(video)" :title="t('watchLater.remove')">
               ✕
             </button>
           </div>
@@ -311,6 +340,20 @@ function toggleSortOrder() {
         <div ref="observerTarget" class="scroll-trigger">
           <div v-if="loadingMore" class="spinner"></div>
           <span v-else-if="!hasNext && results.length > 0" class="end-message">{{ t('search.noMore') }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showRemoveConfirm" class="modal-backdrop" @click.self="cancelRemove">
+      <div class="modal">
+        <h3>{{ t('watchLater.confirmRemoveTitle') }}</h3>
+        <p>
+          {{ t('watchLater.confirmRemoveMessage') }}
+          <strong v-if="pendingRemovalVideo">{{ pendingRemovalVideo.title }}</strong>
+        </p>
+        <div class="modal-actions">
+          <button class="btn-secondary modal-btn" @click="cancelRemove" :disabled="removing">{{ t('watchLater.cancel') }}</button>
+          <button class="btn-danger modal-btn modal-btn-danger" @click="confirmRemove" :disabled="removing">{{ t('watchLater.confirm') }}</button>
         </div>
       </div>
     </div>
@@ -507,6 +550,101 @@ function toggleSortOrder() {
 .end-message {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-bg-surface);
+  padding: 1.5rem;
+  border-radius: 8px;
+  max-width: 400px;
+  width: min(400px, calc(100vw - 2rem));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.modal h3 {
+  margin: 0 0 0.75rem;
+}
+
+.modal p {
+  color: var(--color-text-secondary);
+  margin: 0 0 1.5rem;
+  line-height: 1.5;
+}
+
+.modal strong {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--color-text-primary);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.modal-btn {
+  min-width: 110px;
+  padding: 0.72rem 1.05rem;
+  border-radius: 10px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--color-border-subtle);
+  transition:
+    transform 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    opacity 0.16s ease;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.modal-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.modal-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-secondary.modal-btn {
+  background: color-mix(in srgb, var(--color-bg-hover) 72%, var(--color-bg-surface) 28%);
+  color: var(--color-text-primary);
+}
+
+.btn-secondary.modal-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-focus);
+}
+
+.modal-btn-danger {
+  border-color: rgba(220, 53, 69, 0.42);
+  background: linear-gradient(180deg, #ef5b70 0%, #dc3545 100%);
+  color: white;
+}
+
+.modal-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(180deg, #f46b7f 0%, #e04252 100%);
+  border-color: rgba(244, 107, 127, 0.48);
+  box-shadow: 0 14px 30px rgba(220, 53, 69, 0.26);
 }
 
 .resize-divider {

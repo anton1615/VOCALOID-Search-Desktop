@@ -239,6 +239,8 @@ mod tests {
 21. **PiP header 除錯順序**：先分辨是 `VideoMetaPanel`、`UnifiedPlayer` shell、還是 PiP section stack 在撐高；必要時先加臨時 shell debug 標記定位，確認根因後再移除
 22. **sync route reset 契約**：進入 `/scraper` 是 browseable-list 導航規則的明確例外；必須做 Level 1 playback reset（clear `active_playback` + invalidate Search playback snapshot），但不可清掉 Search / History / Watch Later browsing state
 23. **Search restore 空結果契約**：SearchView restore 不可只用 `results.length` 判斷是否需要 initial search；persisted empty-result、query、sort、filters、pagination 等 state 仍要視為可 restore 的 browsing state
+24. **Watch Later remove confirm 契約**：只有 `WatchLaterView` 列表卡右側 `✕` 需要確認框；`WatchLaterButton` heart toggle 在主視窗與 PiP 仍維持即時 add/remove，不可被這個確認流程波及
+25. **Watch Later remove dialog 樣式契約**：確認框操作鈕需在 `WatchLaterView` 內定義明確按鈕樣式（例如 `modal-btn` / `modal-btn-danger`），不能只套用未定義的 `btn-secondary` / `btn-danger` class，否則會退化成不像按鈕的文字樣式
 
 ## 常見陷阱與已知問題
 
