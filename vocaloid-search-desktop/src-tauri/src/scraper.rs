@@ -100,7 +100,7 @@ impl Scraper {
             let mut params = vec![
                 ("q", self.config.query.as_str()),
                 ("targets", self.config.targets.as_str()),
-                ("fields", "contentId,title,thumbnailUrl,viewCounter,commentCounter,mylistCounter,likeCounter,startTime,tags,lengthSeconds,genre,description,userId"),
+                ("fields", "contentId,title,thumbnailUrl,viewCounter,commentCounter,mylistCounter,likeCounter,startTime,tags,lengthSeconds,userId"),
                 ("_sort", "-startTime"),
                 ("_limit", "100"),
                 ("context", "vocaloid-search-desktop"),
@@ -217,7 +217,7 @@ impl Scraper {
     }
 }
 
-pub fn snapshot_to_db_row(video: &SnapshotVideo) -> (String, String, Option<String>, Option<String>, i64, i64, i64, i64, Option<String>, Option<String>, Option<i64>, Option<String>, Option<String>, Option<String>, Option<String>) {
+pub fn snapshot_to_db_row(video: &SnapshotVideo) -> (String, String, Option<String>, i64, i64, i64, i64, Option<String>, Option<String>, Option<i64>, Option<String>) {
     let thumbnail_url = if video.thumbnailUrl.is_object() {
         video.thumbnailUrl.get("large").and_then(|u| u.as_str()).map(|s| s.to_string())
     } else {
@@ -238,7 +238,6 @@ pub fn snapshot_to_db_row(video: &SnapshotVideo) -> (String, String, Option<Stri
         video.contentId.clone(),
         video.title.clone(),
         thumbnail_url,
-        Some(format!("https://www.nicovideo.jp/watch/{}", video.contentId)),
         video.viewCounter.unwrap_or(0),
         video.commentCounter.unwrap_or(0),
         video.mylistCounter.unwrap_or(0),
@@ -246,10 +245,7 @@ pub fn snapshot_to_db_row(video: &SnapshotVideo) -> (String, String, Option<Stri
         video.startTime.clone(),
         tags,
         video.lengthSeconds,
-        video.genre.clone(),
-        video.description.clone(),
         video.userId.clone(),
-        None,
     )
 }
 
@@ -276,6 +272,21 @@ pub async fn check_snapshot_api_last_update() -> Result<Option<String>, Box<dyn 
         .map(|s| s.to_string());
     
     Ok(last_update)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn snapshot_scraper_request_excludes_description_field_from_reduced_cache_schema() {
+        let source = std::fs::read_to_string(std::path::Path::new(file!())).unwrap();
+        let start = source.find("let mut params = vec![").unwrap();
+        let end = source[start..].find("if let Some(ref start) = start_after").map(|i| start + i).unwrap();
+        let request_block = &source[start..end];
+
+        assert!(request_block.contains("contentId,title,thumbnailUrl,viewCounter,commentCounter,mylistCounter,likeCounter,startTime,tags,lengthSeconds,userId"));
+        assert!(!request_block.contains("description,userId"));
+        assert!(!request_block.contains("genre,userId"));
+    }
 }
 
 pub fn get_daily_update_threshold() -> String {

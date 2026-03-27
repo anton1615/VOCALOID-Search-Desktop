@@ -1,7 +1,7 @@
 use crate::database::Database;
 use crate::models::{
-    ActivePlayback, HistoryState, ListContext, ListContextId, ScraperConfig, ScraperProgress,
-    SearchPlaybackSnapshot, SearchState, Video, WatchLaterState,
+    ActivePlayback, HistoryState, ListContext, ListContextId, PlaybackVideoUpdatedPayload,
+    ScraperConfig, ScraperProgress, SearchPlaybackSnapshot, SearchState, Video, WatchLaterState,
 };
 use async_channel::Sender;
 use parking_lot::RwLock;
@@ -400,6 +400,51 @@ impl AppState {
             }
         }
         false
+    }
+
+    pub fn apply_playback_metadata_update_if_matches(
+        &self,
+        list_id: &ListContextId,
+        playlist_version: u64,
+        index: usize,
+        video: Video,
+    ) -> Option<PlaybackVideoUpdatedPayload> {
+        let playback = self.active_playback.read();
+        let Some(active_playback) = playback.as_ref() else {
+            return None;
+        };
+
+        if &active_playback.list_id != list_id
+            || active_playback.list_version != playlist_version
+            || active_playback.current_index != index
+        {
+            return None;
+        }
+
+        let mut contexts = self.list_contexts.write();
+        let context = contexts.get_mut(list_id)?;
+
+        if context.version != playlist_version {
+            return None;
+        }
+
+        if context
+            .items
+            .get(index)
+            .map(|current_video| current_video.id.as_str())
+            != Some(video.id.as_str())
+        {
+            return None;
+        }
+
+        context.items[index] = video.clone();
+
+        Some(PlaybackVideoUpdatedPayload::new(
+            list_id.clone(),
+            playlist_version,
+            index,
+            video,
+        ))
     }
 
     pub fn matches_active_playback_metadata_update(
@@ -964,6 +1009,90 @@ mod tests {
             2,
             &sample_video("sm10"),
         ));
+    }
+
+    #[test]
+    fn apply_playback_metadata_update_if_matches_updates_matching_item_only() {
+        let test = TestAppState::new();
+        let history_items = vec![
+            sample_video("sm1"),
+            sample_video("sm2"),
+            sample_video("sm9"),
+        ];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+
+        let payload = test.state.apply_playback_metadata_update_if_matches(
+            &ListContextId::History,
+            history_version,
+            2,
+            Video {
+                title: "updated title".to_string(),
+                ..sample_video("sm9")
+            },
+        );
+
+        assert!(payload.is_some());
+        assert_eq!(
+            test.state.get_list_context_items(&ListContextId::History)[2].title,
+            "updated title"
+        );
+    }
+
+    #[test]
+    fn apply_playback_metadata_update_if_matches_rejects_and_preserves_stale_item() {
+        let test = TestAppState::new();
+        let history_items = vec![
+            sample_video("sm1"),
+            sample_video("sm2"),
+            sample_video("sm9"),
+        ];
+        test.state.update_list_context(
+            ListContextId::History,
+            history_items,
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 2);
+
+        let payload = test.state.apply_playback_metadata_update_if_matches(
+            &ListContextId::History,
+            history_version,
+            1,
+            Video {
+                title: "stale title".to_string(),
+                ..sample_video("sm2")
+            },
+        );
+
+        assert!(payload.is_none());
+        assert_eq!(
+            test.state.get_list_context_items(&ListContextId::History)[1].title,
+            "title-sm2"
+        );
     }
 
     fn sample_video(id: &str) -> Video {

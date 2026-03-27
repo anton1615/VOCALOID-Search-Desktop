@@ -391,6 +391,7 @@ pub struct PlaylistState {
     pub playlist_type: PlaylistType,
     pub results: Vec<Video>,
     pub index: Option<usize>,
+    pub current_video_id: Option<String>,
     pub has_next: bool,
     pub pip_active: bool,
     pub playlist_version: u64,
@@ -486,17 +487,87 @@ pub struct SnapshotVideo {
     pub contentId: String,
     pub title: String,
     pub thumbnailUrl: serde_json::Value,
+    #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
     pub viewCounter: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
     pub commentCounter: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
     pub mylistCounter: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
     pub likeCounter: Option<i64>,
     pub startTime: Option<String>,
     pub tags: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
     pub lengthSeconds: Option<i64>,
     pub genre: Option<String>,
     pub description: Option<String>,
     #[serde(deserialize_with = "deserialize_user_id")]
     pub userId: Option<String>,
+}
+
+fn deserialize_optional_i64_flexible<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+
+    struct OptionalI64Visitor;
+
+    impl<'de> Visitor<'de> for OptionalI64Visitor {
+        type Value = Option<i64>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer, numeric string, or null")
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(value))
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            i64::try_from(value)
+                .map(Some)
+                .map_err(|_| de::Error::custom("u64 value does not fit into i64"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let trimmed = value.trim();
+
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+
+            trimmed
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| de::Error::custom(format!("invalid numeric string: {trimmed}")))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(OptionalI64Visitor)
 }
 
 fn deserialize_user_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>

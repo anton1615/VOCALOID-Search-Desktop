@@ -32,7 +32,6 @@ export interface PlayerEvents {
  */
 export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
   const {
-    isPip = false,
     onVideoSelected,
     onPlaybackSettingsChanged,
     onVideoWatched,
@@ -54,7 +53,6 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     // Listen for video-selected event
     listen<VideoSelectedPayload>('video-selected', async (event) => {
       const payload = event.payload
-      console.log(`[${isPip ? 'PiP' : 'Main'}] Received video-selected event:`, payload.video.id, 'index:', payload.index)
       await onVideoSelected(payload)
     }).then((unlisten) => {
       unlistenVideoSelected = unlisten
@@ -63,7 +61,6 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     // Listen for playback-video-updated event
     listen<PlaybackVideoUpdatedPayload>('playback-video-updated', async (event) => {
       const payload = event.payload
-      console.log(`[${isPip ? 'PiP' : 'Main'}] Received playback-video-updated event:`, payload.video.id, 'index:', payload.index)
       await onPlaybackMetadataUpdated?.(payload)
     }).then((unlisten) => {
       unlistenPlaybackVideoUpdated = unlisten
@@ -72,7 +69,6 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     // Listen for playback-settings-changed event
     listen<PlaybackSettings>('playback-settings-changed', (event) => {
       const settings = event.payload
-      console.log(`[${isPip ? 'PiP' : 'Main'}] Received playback-settings-changed event`)
       onPlaybackSettingsChanged(settings)
     }).then((unlisten) => {
       unlistenPlaybackSettings = unlisten
@@ -81,7 +77,6 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
     // Listen for video-watched event
     listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
       const { video_id, is_watched } = event.payload
-      console.log(`[${isPip ? 'PiP' : 'Main'}] Received video-watched event:`, video_id, is_watched)
       onVideoWatched(video_id, is_watched)
     }).then((unlisten) => {
       unlistenVideoWatched = unlisten
@@ -89,7 +84,6 @@ export function usePlayerEvents(options: PlayerEventsOptions): PlayerEvents {
 
     // Listen for active-playback-cleared event (CRITICAL: This fixes the PIP reset bug)
     listen('active-playback-cleared', () => {
-      console.log(`[${isPip ? 'PiP' : 'Main'}] Received active-playback-cleared event`)
       onActivePlaybackCleared()
     }).then((unlisten) => {
       unlistenActivePlaybackCleared = unlisten

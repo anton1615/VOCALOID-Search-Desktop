@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     thumbnail_url TEXT,
-    watch_url TEXT,
     view_count INTEGER DEFAULT 0,
     comment_count INTEGER DEFAULT 0,
     mylist_count INTEGER DEFAULT 0,
@@ -20,10 +19,7 @@ CREATE TABLE IF NOT EXISTS videos (
     start_time TEXT,
     tags TEXT,
     duration INTEGER,
-    category TEXT,
-    description TEXT,
     uploader_id TEXT,
-    uploader_name TEXT,
     last_update_time TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -146,6 +142,7 @@ pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), ru
     // Initialize videos.db
     let videos_conn = Connection::open(videos_path)?;
     videos_conn.execute_batch(VIDEOS_SCHEMA)?;
+    migrate_videos_schema(&videos_conn)?;
     videos_conn.pragma_update(None, "journal_mode", "WAL")?;
     videos_conn.pragma_update(None, "synchronous", "NORMAL")?;
     videos_conn.pragma_update(None, "cache_size", -64000)?;
@@ -157,6 +154,103 @@ pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), ru
     user_data_conn.pragma_update(None, "journal_mode", "WAL")?;
     user_data_conn.pragma_update(None, "synchronous", "NORMAL")?;
     user_data_conn.pragma_update(None, "cache_size", -64000)?;
+
+    Ok(())
+}
+
+fn migrate_videos_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info(videos)")?;
+    let existing_columns: Vec<String> = stmt
+        .query_map([], |row| row.get(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let needs_rebuild = ["watch_url", "category", "description", "uploader_name"]
+        .iter()
+        .any(|column| existing_columns.iter().any(|existing| existing == column));
+
+    if !needs_rebuild {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        BEGIN IMMEDIATE;
+        ALTER TABLE videos RENAME TO videos_old;
+        CREATE TABLE videos (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            thumbnail_url TEXT,
+            view_count INTEGER DEFAULT 0,
+            comment_count INTEGER DEFAULT 0,
+            mylist_count INTEGER DEFAULT 0,
+            like_count INTEGER DEFAULT 0,
+            start_time TEXT,
+            tags TEXT,
+            duration INTEGER,
+            uploader_id TEXT,
+            last_update_time TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO videos (
+            id,
+            title,
+            thumbnail_url,
+            view_count,
+            comment_count,
+            mylist_count,
+            like_count,
+            start_time,
+            tags,
+            duration,
+            uploader_id,
+            last_update_time
+        )
+        SELECT
+            id,
+            title,
+            thumbnail_url,
+            view_count,
+            comment_count,
+            mylist_count,
+            like_count,
+            start_time,
+            tags,
+            duration,
+            uploader_id,
+            last_update_time
+        FROM videos_old;
+        DROP TABLE videos_old;
+        CREATE INDEX IF NOT EXISTS idx_view_count ON videos(view_count);
+        CREATE INDEX IF NOT EXISTS idx_mylist_count ON videos(mylist_count);
+        CREATE INDEX IF NOT EXISTS idx_comment_count ON videos(comment_count);
+        CREATE INDEX IF NOT EXISTS idx_like_count ON videos(like_count);
+        CREATE INDEX IF NOT EXISTS idx_start_time ON videos(start_time);
+        DROP TABLE IF EXISTS video_fts;
+        CREATE VIRTUAL TABLE video_fts USING fts5(
+            title,
+            tags,
+            content='videos',
+            content_rowid='rowid',
+            tokenize='unicode61'
+        );
+        CREATE TRIGGER IF NOT EXISTS videos_ai AFTER INSERT ON videos BEGIN
+            INSERT INTO video_fts(rowid, title, tags)
+            VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS videos_ad AFTER DELETE ON videos BEGIN
+            INSERT INTO video_fts(video_fts, rowid, title, tags)
+            VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS videos_au AFTER UPDATE ON videos BEGIN
+            INSERT INTO video_fts(video_fts, rowid, title, tags)
+            VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
+            INSERT INTO video_fts(rowid, title, tags)
+            VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
+        END;
+        INSERT INTO video_fts(rowid, title, tags)
+        SELECT rowid, title, COALESCE(tags, '') FROM videos;
+        COMMIT;
+        "#,
+    )?;
 
     Ok(())
 }
@@ -178,12 +272,18 @@ fn add_history_column_if_missing(
         .query_map([], |row| row.get(1))?
         .collect::<Result<Vec<_>, _>>()?;
 
-    if existing_columns.iter().any(|existing| existing == column_name) {
+    if existing_columns
+        .iter()
+        .any(|existing| existing == column_name)
+    {
         return Ok(());
     }
 
     conn.execute(
-        &format!("ALTER TABLE history ADD COLUMN {} {}", column_name, column_definition),
+        &format!(
+            "ALTER TABLE history ADD COLUMN {} {}",
+            column_name, column_definition
+        ),
         [],
     )?;
     Ok(())
@@ -297,18 +397,21 @@ impl Database {
     pub fn get_all_watched_video_ids(&self) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.connect_user_data()?;
         let mut stmt = conn.prepare("SELECT video_id FROM history")?;
-        let ids: Vec<String> = stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ids)
     }
 
     /// Get all watched video IDs with first_watched_seq <= boundary_seq
     /// Used for frozen watched boundary in Search playback
-    pub fn get_watched_ids_up_to_boundary(&self, boundary_seq: i64) -> Result<Vec<String>, rusqlite::Error> {
+    pub fn get_watched_ids_up_to_boundary(
+        &self,
+        boundary_seq: i64,
+    ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.connect_user_data()?;
         migrate_user_data_schema(&conn)?;
-        let mut stmt = conn.prepare(
-            "SELECT video_id FROM history WHERE first_watched_seq <= ?"
-        )?;
+        let mut stmt = conn.prepare("SELECT video_id FROM history WHERE first_watched_seq <= ?")?;
         let ids: Vec<String> = stmt
             .query_map([boundary_seq], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -320,12 +423,11 @@ impl Database {
     pub fn get_max_first_watched_seq(&self) -> Result<i64, rusqlite::Error> {
         let conn = self.connect_user_data()?;
         migrate_user_data_schema(&conn)?;
-        let max_seq: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(first_watched_seq), 0) FROM history",
-                [],
-                |row| row.get(0),
-            )?;
+        let max_seq: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(first_watched_seq), 0) FROM history",
+            [],
+            |row| row.get(0),
+        )?;
         Ok(max_seq)
     }
 
@@ -435,7 +537,7 @@ impl Database {
                 let stored_title: String = row.get(1)?;
                 let stored_thumbnail: Option<String> = row.get(2)?;
                 let watched_at: String = row.get(3)?;
-                
+
                 let from_videos: Option<(String, Option<String>)> = videos_conn
                     .query_row(
                         "SELECT title, thumbnail_url FROM videos WHERE id = ?",
@@ -443,15 +545,19 @@ impl Database {
                         |video_row| Ok((video_row.get(0)?, video_row.get(1)?)),
                     )
                     .ok();
-                
-                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画" {
-                    from_videos.as_ref().map(|(t, _)| t.clone()).unwrap_or(stored_title)
+
+                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画"
+                {
+                    from_videos
+                        .as_ref()
+                        .map(|(t, _)| t.clone())
+                        .unwrap_or(stored_title)
                 } else {
                     stored_title
                 };
                 let thumbnail_url = stored_thumbnail
                     .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()));
-                
+
                 Ok(crate::models::HistoryEntry {
                     video_id,
                     title,
@@ -483,7 +589,6 @@ impl Database {
             String,
             String,
             Option<String>,
-            Option<String>,
             i64,
             i64,
             i64,
@@ -492,9 +597,6 @@ impl Database {
             Option<String>,
             Option<i64>,
             Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
         )],
     ) -> Result<(), rusqlite::Error> {
         let mut conn = self.connect_videos()?;
@@ -502,16 +604,15 @@ impl Database {
         {
             let mut stmt = tx.prepare_cached(
                 "INSERT OR REPLACE INTO videos 
-                (id, title, thumbnail_url, watch_url, view_count, comment_count, 
-                 mylist_count, like_count, start_time, tags, duration, category, 
-                 description, uploader_id, uploader_name, last_update_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+9 hours'))",
+                (id, title, thumbnail_url, view_count, comment_count, 
+                 mylist_count, like_count, start_time, tags, duration, uploader_id, last_update_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+9 hours'))",
             )?;
 
             for video in videos {
                 stmt.execute(params![
                     video.0, video.1, video.2, video.3, video.4, video.5, video.6, video.7,
-                    video.8, video.9, video.10, video.11, video.12, video.13, video.14
+                    video.8, video.9, video.10
                 ])?;
             }
         }
@@ -557,7 +658,7 @@ impl Database {
     ) -> Result<(), rusqlite::Error> {
         let user_conn = self.connect_user_data()?;
         let videos_conn = self.connect_videos()?;
-        
+
         let is_bad_title = title.trim().is_empty() || title == "ニコニコ動画";
         let existing: Option<(String, Option<String>)> = user_conn
             .query_row(
@@ -573,7 +674,7 @@ impl Database {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
-        
+
         let final_title = if !is_bad_title {
             title.to_string()
         } else if let Some((db_title, _)) = &from_videos {
@@ -583,12 +684,12 @@ impl Database {
         } else {
             title.to_string()
         };
-        
+
         let final_thumbnail = thumbnail_url
             .map(|s| s.to_string())
             .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()))
             .or_else(|| existing.as_ref().and_then(|(_, thumb)| thumb.clone()));
-        
+
         user_conn.execute(
             "INSERT OR REPLACE INTO watch_later (video_id, title, thumbnail_url, added_at) VALUES (?, ?, ?, datetime('now', '+9 hours'))",
             params![video_id, final_title, final_thumbnail],
@@ -639,7 +740,7 @@ impl Database {
                 let stored_title: String = row.get(1)?;
                 let stored_thumbnail: Option<String> = row.get(2)?;
                 let added_at: String = row.get(3)?;
-                
+
                 let from_videos: Option<(String, Option<String>)> = videos_conn
                     .query_row(
                         "SELECT title, thumbnail_url FROM videos WHERE id = ?",
@@ -647,15 +748,19 @@ impl Database {
                         |video_row| Ok((video_row.get(0)?, video_row.get(1)?)),
                     )
                     .ok();
-                
-                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画" {
-                    from_videos.as_ref().map(|(t, _)| t.clone()).unwrap_or(stored_title)
+
+                let title = if stored_title.trim().is_empty() || stored_title == "ニコニコ動画"
+                {
+                    from_videos
+                        .as_ref()
+                        .map(|(t, _)| t.clone())
+                        .unwrap_or(stored_title)
                 } else {
                     stored_title
                 };
                 let thumbnail_url = stored_thumbnail
                     .or_else(|| from_videos.as_ref().and_then(|(_, thumb)| thumb.clone()));
-                
+
                 Ok(crate::models::WatchLaterEntry {
                     video_id,
                     title,
@@ -671,7 +776,8 @@ impl Database {
 
     pub fn get_watch_later_count(&self) -> Result<usize, rusqlite::Error> {
         let conn = self.connect_user_data()?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM watch_later", [], |row| row.get(0))?;
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM watch_later", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 }
@@ -857,8 +963,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], ("sm1".to_string(), 1, "2026-03-01 00:00:00".to_string()));
-        assert_eq!(rows[1], ("sm2".to_string(), 2, "2026-03-02 00:00:00".to_string()));
+        assert_eq!(
+            rows[0],
+            ("sm1".to_string(), 1, "2026-03-01 00:00:00".to_string())
+        );
+        assert_eq!(
+            rows[1],
+            ("sm2".to_string(), 2, "2026-03-02 00:00:00".to_string())
+        );
     }
 
     #[test]
@@ -901,5 +1013,175 @@ mod tests {
         assert_ne!(second_state.2, "2000-01-01 00:00:00");
         assert_eq!(second_state.3, first_state.0);
         assert_eq!(second_state.4, first_state.1);
+    }
+
+    #[test]
+    fn videos_schema_omits_trimmed_playback_only_columns() {
+        let paths = TestDbPaths::new("videos-schema-trimmed");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.videos).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(videos)").unwrap();
+        let column_names: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(column_names.contains(&"thumbnail_url".to_string()));
+        assert!(column_names.contains(&"duration".to_string()));
+        assert!(column_names.contains(&"uploader_id".to_string()));
+        assert!(!column_names.contains(&"watch_url".to_string()));
+        assert!(!column_names.contains(&"description".to_string()));
+        assert!(!column_names.contains(&"uploader_name".to_string()));
+        assert!(!column_names.contains(&"category".to_string()));
+    }
+
+    #[test]
+    fn existing_videos_schema_migrates_without_removed_columns() {
+        let paths = TestDbPaths::new("videos-schema-migrate");
+
+        let videos_conn = Connection::open(&paths.videos).unwrap();
+        videos_conn
+            .execute_batch(
+                r#"
+                CREATE TABLE videos (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    thumbnail_url TEXT,
+                    watch_url TEXT,
+                    view_count INTEGER DEFAULT 0,
+                    comment_count INTEGER DEFAULT 0,
+                    mylist_count INTEGER DEFAULT 0,
+                    like_count INTEGER DEFAULT 0,
+                    start_time TEXT,
+                    tags TEXT,
+                    duration INTEGER,
+                    category TEXT,
+                    description TEXT,
+                    uploader_id TEXT,
+                    uploader_name TEXT,
+                    last_update_time TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                "#,
+            )
+            .unwrap();
+        videos_conn
+            .execute(
+                "INSERT INTO videos (id, title, thumbnail_url, watch_url, view_count, comment_count, mylist_count, like_count, start_time, tags, duration, category, description, uploader_id, uploader_name, last_update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    "sm9",
+                    "Title",
+                    "https://thumb",
+                    "https://www.nicovideo.jp/watch/sm9",
+                    1,
+                    2,
+                    3,
+                    4,
+                    "2026-01-01T00:00:00+09:00",
+                    "miku vocaloid",
+                    123,
+                    "music",
+                    "desc",
+                    "42",
+                    "MikuP",
+                    "2026-01-02 00:00:00"
+                ],
+            )
+            .unwrap();
+        drop(videos_conn);
+
+        let user_conn = Connection::open(&paths.user_data).unwrap();
+        user_conn.execute_batch(USER_DATA_SCHEMA).unwrap();
+        drop(user_conn);
+
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.videos).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(videos)").unwrap();
+        let column_names: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(!column_names.contains(&"watch_url".to_string()));
+        assert!(!column_names.contains(&"description".to_string()));
+        assert!(!column_names.contains(&"uploader_name".to_string()));
+        assert!(!column_names.contains(&"category".to_string()));
+
+        let row: (String, Option<String>, i64, Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT title, thumbnail_url, like_count, duration, uploader_id FROM videos WHERE id = ?",
+                ["sm9"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+
+        assert_eq!(row.0, "Title");
+        assert_eq!(row.1.as_deref(), Some("https://thumb"));
+        assert_eq!(row.2, 4);
+        assert_eq!(row.3, Some(123));
+        assert_eq!(row.4.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn history_entries_stay_self_contained_when_video_cache_row_is_missing() {
+        let paths = TestDbPaths::new("history-self-contained");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+        let db = paths.database();
+
+        let conn = db.connect_user_data().unwrap();
+        conn.execute(
+            "INSERT INTO history (video_id, title, thumbnail_url, watched_at, first_watched_seq, first_watched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                "sm9",
+                "Stored History Title",
+                "https://history-thumb",
+                "2026-03-01 00:00:00",
+                1,
+                "2026-03-01 00:00:00"
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let entries = db.get_history(1, 50, None).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Stored History Title");
+        assert_eq!(
+            entries[0].thumbnail_url.as_deref(),
+            Some("https://history-thumb")
+        );
+    }
+
+    #[test]
+    fn watch_later_entries_stay_self_contained_when_video_cache_row_is_missing() {
+        let paths = TestDbPaths::new("watch-later-self-contained");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+        let db = paths.database();
+
+        let conn = db.connect_user_data().unwrap();
+        conn.execute(
+            "INSERT INTO watch_later (video_id, title, thumbnail_url, added_at) VALUES (?, ?, ?, ?)",
+            params![
+                "sm9",
+                "Stored Watch Later Title",
+                "https://watch-later-thumb",
+                "2026-03-01 00:00:00"
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let entries = db.get_watch_later(1, 50, None).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Stored Watch Later Title");
+        assert_eq!(
+            entries[0].thumbnail_url.as_deref(),
+            Some("https://watch-later-thumb")
+        );
     }
 }

@@ -3,12 +3,18 @@ import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
+import { api, type PlaybackVideoUpdatedPayload, type Video, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
 import UploaderAvatar from '../components/UploaderAvatar.vue'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
 import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
-import { scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
+import {
+  applyPlaybackMetadataUpdate,
+  scrollVideoIntoView,
+  shouldApplyPlaybackMetadataUpdate,
+  shouldApplyPlaylistSelection,
+  shouldApplyPlaylistSelectionVersion,
+} from '../features/playlistViews/playlistViewState'
 import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
@@ -164,7 +170,6 @@ async function search() {
 async function loadMore() {
   // Prevent loadMore during active search
   if (loading.value) {
-    console.log('[loadMore] Blocked: search in progress')
     return
   }
   if (loadingMore.value || !hasNext.value) return
@@ -187,7 +192,6 @@ async function loadMore() {
 }
 
 async function playVideo(video: Video) {
-  console.log('[playVideo] Called with video:', video.id)
   const index = results.value.findIndex(v => v.id === video.id)
   if (index >= 0) {
     await api.setPlaylistType('Search')
@@ -328,6 +332,7 @@ function setupObserver() {
 
 let unlistenPip: (() => void) | null = null
 let unlistenVideoSelected: (() => void) | null = null
+let unlistenPlaybackVideoUpdated: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
 
 onMounted(async () => {
@@ -343,7 +348,6 @@ onMounted(async () => {
     const restored = resolveSearchRestoreState(playlistState, searchState)
 
     if (!restored.shouldRunInitialSearch) {
-      console.log('[SearchView] Restoring state from Rust:', playlistState.results.length, 'videos, index:', playlistState.index)
       results.value = restored.results
       currentVideoIndex.value = restored.currentVideoIndex
       currentVideo.value = restored.currentVideo
@@ -351,9 +355,7 @@ onMounted(async () => {
       totalCount.value = restored.totalCount
       page.value = restored.page
       pipActive.value = restored.pipActive
-      console.log('[SearchView] Restored pipActive:', pipActive.value)
     } else {
-      console.log('[SearchView] No existing state, performing initial search')
       await search()
     }
   } catch (e) {
@@ -368,9 +370,7 @@ onMounted(async () => {
   scrollVideoIntoView(currentVideoIndex.value, listContainer)
 
   unlistenPip = await listen('pip-closed', () => {
-    console.log('[SearchView] Received pip-closed event')
     pipActive.value = false
-    console.log('[SearchView] pipActive set to false')
   })
 
   unlistenVideoSelected = await listen<VideoSelectedPayload>('video-selected', async (event) => {
@@ -384,7 +384,6 @@ onMounted(async () => {
       currentVideoIndex.value = -1
       return
     }
-    console.log('[SearchView] Received video-selected event:', payload.video.id, 'index:', payload.index)
     currentVideo.value = payload.video
     currentVideoIndex.value = payload.index
 
@@ -428,15 +427,35 @@ onMounted(async () => {
       hasNext: hasNext.value,
       loadingMore: loadingMore.value,
     })) {
-      console.log('[SearchView] Preloading more results...')
       loadMore()
     }
 
   })
 
+  unlistenPlaybackVideoUpdated = await listen<PlaybackVideoUpdatedPayload>('playback-video-updated', async (event) => {
+    const payload = event.payload
+    const latestPlaylistState = await api.getPlaylistState()
+
+    if (
+      latestPlaylistState.playlist_type !== 'Search' ||
+      latestPlaylistState.index !== currentVideoIndex.value ||
+      !shouldApplyPlaybackMetadataUpdate({
+        expectedPlaylistType: 'Search',
+        expectedPlaylistVersion: latestPlaylistState.playlist_version,
+        currentVideoIndex: currentVideoIndex.value,
+        currentVideoId: latestPlaylistState.current_video_id,
+        payload,
+      }) ||
+      !currentVideo.value
+    ) {
+      return
+    }
+
+    currentVideo.value = applyPlaybackMetadataUpdate(currentVideo.value, payload)
+  })
+
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', (event) => {
     const { video_id, is_watched } = event.payload
-    console.log('[SearchView] Received video-watched event:', video_id, is_watched)
     // Update results array
     const video = results.value.find(v => v.id === video_id)
     if (video) {
@@ -454,6 +473,7 @@ onUnmounted(() => {
   if (observer) observer.disconnect()
   if (unlistenPip) unlistenPip()
   if (unlistenVideoSelected) unlistenVideoSelected()
+  if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
   if (unlistenVideoWatched) unlistenVideoWatched()
 })
 

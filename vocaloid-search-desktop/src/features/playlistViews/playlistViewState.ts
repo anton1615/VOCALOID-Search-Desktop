@@ -1,4 +1,4 @@
-import type { PlaylistType, Video, VideoSelectedPayload } from '../../api/tauri-commands'
+import type { PlaybackVideoUpdatedPayload, PlaylistType, Video, VideoSelectedPayload } from '../../api/tauri-commands'
 
 interface InitialPlaylistViewStateOptions {
   expectedPlaylistType: PlaylistType
@@ -69,6 +69,36 @@ export function shouldApplyPlaylistSelectionVersion(
   payload: Pick<VideoSelectedPayload, 'playlist_version'>
 ): boolean {
   return payload.playlist_version === expectedPlaylistVersion
+}
+
+interface PlaybackMetadataUpdateOptions {
+  expectedPlaylistType: PlaylistType
+  expectedPlaylistVersion: number
+  currentVideoIndex: number
+  currentVideoId: string | null | undefined
+  payload: Pick<PlaybackVideoUpdatedPayload, 'playlist_type' | 'playlist_version' | 'index' | 'video'>
+}
+
+export function shouldApplyPlaybackMetadataUpdate({
+  expectedPlaylistType,
+  expectedPlaylistVersion,
+  currentVideoIndex,
+  currentVideoId,
+  payload,
+}: PlaybackMetadataUpdateOptions): boolean {
+  return (
+    payload.playlist_type === expectedPlaylistType &&
+    payload.playlist_version === expectedPlaylistVersion &&
+    payload.index === currentVideoIndex &&
+    payload.video.id === currentVideoId
+  )
+}
+
+export function applyPlaybackMetadataUpdate(
+  _currentVideo: Video,
+  payload: Pick<PlaybackVideoUpdatedPayload, 'video'>
+): Video {
+  return payload.video
 }
 
 

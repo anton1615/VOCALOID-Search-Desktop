@@ -2,10 +2,17 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
-import { api, type Video, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
+import { api, type PlaybackVideoUpdatedPayload, type Video, type VideoSelectedPayload, formatDuration } from '../api/tauri-commands'
 import { formatDateTime } from '../utils/dateTime'
 import { mapHistoryEntryToVideo } from '../utils/playlistPlaceholders'
-import { getInitialPlaylistViewState, scrollVideoIntoView, shouldApplyPlaylistSelection, shouldApplyPlaylistSelectionVersion } from '../features/playlistViews/playlistViewState'
+import {
+  applyPlaybackMetadataUpdate,
+  getInitialPlaylistViewState,
+  scrollVideoIntoView,
+  shouldApplyPlaybackMetadataUpdate,
+  shouldApplyPlaylistSelection,
+  shouldApplyPlaylistSelectionVersion,
+} from '../features/playlistViews/playlistViewState'
 import { createPagedPlaylistController } from '../features/playlistViews/pagedPlaylistController'
 
 const { t } = useI18n()
@@ -125,6 +132,7 @@ function setupObserver() {
 
 // Event listeners
 let unlistenVideoSelected: (() => void) | null = null
+let unlistenPlaybackVideoUpdated: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
 
 onMounted(async () => {
@@ -209,6 +217,28 @@ onMounted(async () => {
       }
     }
   })
+
+  unlistenPlaybackVideoUpdated = await listen<PlaybackVideoUpdatedPayload>('playback-video-updated', async (event) => {
+    const payload = event.payload
+    const latestPlaylistState = await api.getPlaylistState()
+
+    if (
+      latestPlaylistState.playlist_type !== 'History' ||
+      latestPlaylistState.index !== currentVideoIndex.value ||
+      !shouldApplyPlaybackMetadataUpdate({
+        expectedPlaylistType: 'History',
+        expectedPlaylistVersion: latestPlaylistState.playlist_version,
+        currentVideoIndex: currentVideoIndex.value,
+        currentVideoId: latestPlaylistState.current_video_id,
+        payload,
+      }) ||
+      !currentVideo.value
+    ) {
+      return
+    }
+
+    currentVideo.value = applyPlaybackMetadataUpdate(currentVideo.value, payload)
+  })
   
   unlistenVideoWatched = await listen<{ video_id: string; is_watched: boolean }>('video-watched', async (event) => {
     const { video_id, is_watched } = event.payload
@@ -221,6 +251,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (observer) observer.disconnect()
   if (unlistenVideoSelected) unlistenVideoSelected()
+  if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
   if (unlistenVideoWatched) unlistenVideoWatched()
   
   // Save state to Rust

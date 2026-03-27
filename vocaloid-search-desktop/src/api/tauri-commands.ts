@@ -194,6 +194,7 @@ export interface PlaylistState {
   playlist_type: PlaylistType
   results: Video[]
   index: number | null
+  current_video_id: string | null
   has_next: boolean
   pip_active: boolean
   playlist_version: number
