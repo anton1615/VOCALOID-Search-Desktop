@@ -167,7 +167,7 @@ The player renders first, then richer metadata lands through authoritative backe
 | **Frontend** | TypeScript, Vue 3, Vite, Tailwind CSS |
 | **Backend** | Rust (Tauri 2.x) |
 | **Database** | SQLite with FTS5 full-text search |
-| **Data Sources** | [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html), [GetThumbInfo API](https://site.nicovideo.jp/search-api-docs/thumb-info.html) |
+| **Data Sources** | [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html) for sync/search cache, `watch/{id}?responseType=json` for single-video playback metadata enrichment |
 
 ### Implementation Architecture
 

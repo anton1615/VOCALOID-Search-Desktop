@@ -167,7 +167,7 @@ Search / History / Watch Later 各自擁有獨立的 context、identity 與 vers
 | **前端** | TypeScript, Vue 3, Vite, Tailwind CSS |
 | **後端** | Rust (Tauri 2.x) |
 | **資料庫** | SQLite (FTS5 全文搜尋) |
-| **資料來源** | [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html), [GetThumbInfo API](https://site.nicovideo.jp/search-api-docs/thumb-info.html) |
+| **資料來源** | 用於同步 / 搜尋快取的 [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html)，以及用於單支影片播放 metadata enrichment 的 `watch/{id}?responseType=json` |
 
 ### 實作架構
 
