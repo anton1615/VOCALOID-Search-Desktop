@@ -41,6 +41,7 @@ export interface PlayerCore {
   playerReady: Ref<boolean>
   hasNext: Ref<boolean>
   metadataReady: Ref<boolean>
+  playbackSessionKey: Ref<string>
 
   // Settings
   autoPlay: Ref<boolean>
@@ -99,6 +100,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   const playerReady = ref(false)
   const hasNext = ref(false)
   const metadataReady = ref(false)
+  const playbackSessionKey = ref('empty')
   const selectedPlaybackIdentity = ref<PlaybackIdentityPayload | null>(null)
   const resolvedPlaybackIdentity = ref<PlaybackIdentityPayload | null>(null)
   
@@ -160,6 +162,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
 
     if (!video) {
       metadataReady.value = false
+      playbackSessionKey.value = 'empty'
       selectedPlaybackIdentity.value = null
       resolvedPlaybackIdentity.value = null
       playerInfo.clearCurrentUserInfo()
@@ -167,6 +170,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     }
 
     const displayedIdentity = resolveDisplayedPlaybackIdentity(video, index)
+    playbackSessionKey.value = buildPlaybackSessionKey(displayedIdentity, video, index)
     const selectionStillPending =
       samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value) &&
       !samePlaybackIdentity(displayedIdentity, resolvedPlaybackIdentity.value)
@@ -202,6 +206,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     playerReady.value = false
     hasNext.value = false
     metadataReady.value = false
+    playbackSessionKey.value = 'empty'
     selectedPlaybackIdentity.value = null
     resolvedPlaybackIdentity.value = null
     hasMarkedCurrent = false
@@ -315,6 +320,27 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     await settings.loadSettings()
   }
 
+  function buildPlaybackSessionKey(
+    identity: PlaybackIdentityPayload | null,
+    video: Video | null,
+    index: number,
+  ): string {
+    if (identity) {
+      return [
+        identity.playlistType,
+        identity.playlistVersion,
+        identity.currentIndex,
+        identity.videoId ?? 'null',
+      ].join(':')
+    }
+
+    if (!video) {
+      return 'empty'
+    }
+
+    return ['fallback', index, video.id].join(':')
+  }
+
   function samePlaybackIdentity(left: PlaybackIdentityPayload | null | undefined, right: PlaybackIdentityPayload | null | undefined): boolean {
     if (!left || !right) {
       return false
@@ -342,13 +368,13 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
   }
 
   function resolveDisplayedPlaybackIdentity(video: Video, index: number): PlaybackIdentityPayload | null {
+    if (selectedPlaybackIdentity.value?.currentIndex === index && selectedPlaybackIdentity.value.videoId === video.id) {
+      return selectedPlaybackIdentity.value
+    }
+
     const currentIdentity = getPlaybackIdentity?.()
     if (currentIdentity?.currentIndex === index && currentIdentity.videoId === video.id) {
       return currentIdentity
-    }
-
-    if (selectedPlaybackIdentity.value?.currentIndex === index && selectedPlaybackIdentity.value.videoId === video.id) {
-      return selectedPlaybackIdentity.value
     }
 
     return null
@@ -477,6 +503,7 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     playerReady,
     hasNext,
     metadataReady,
+    playbackSessionKey,
 
     // Settings
     autoPlay: settings.autoPlay,

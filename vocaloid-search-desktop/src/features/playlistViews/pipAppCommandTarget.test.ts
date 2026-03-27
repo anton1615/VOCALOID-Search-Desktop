@@ -65,6 +65,37 @@ describe('PipApp command target handling', () => {
     expect(unifiedPlayerSource).toContain('playlistVersion: props.playlistVersion,')
   })
 
+  test('rebuilds both main-window and PiP player shells from authoritative playback identity fields, not only current video id', () => {
+    const unifiedPlayerPath = resolve(__dirname, '../../components/UnifiedPlayer.vue')
+    const source = readFileSync(unifiedPlayerPath, 'utf8')
+
+    expect(source).toContain('props.playlistType,')
+    expect(source).toContain('props.playlistVersion,')
+    expect(source).toContain('props.currentVideoIndex,')
+    expect(source).toContain('props.currentVideo?.id ?? null,')
+    expect(source).not.toContain('if (video?.id !== oldVideo?.id)')
+  })
+
+  test('routes next and previous controls through authoritative Rust playback navigation instead of rebrowsing by index', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const pipAppPath = resolve(__dirname, '../../PipApp.vue')
+    const apiPath = resolve(__dirname, '../../api/tauri-commands.ts')
+    const appSource = readFileSync(appPath, 'utf8')
+    const pipSource = readFileSync(pipAppPath, 'utf8')
+    const apiSource = readFileSync(apiPath, 'utf8')
+
+    expect(apiSource).toContain("return invoke('play_next')")
+    expect(apiSource).toContain("return invoke('play_previous')")
+    expect(appSource).toContain('await api.playNext()')
+    expect(appSource).toContain('await api.playPrevious()')
+    expect(pipSource).toContain('await api.playNext()')
+    expect(pipSource).toContain('await api.playPrevious()')
+    expect(appSource).not.toContain('await api.setPlaylistIndex(currentVideoIndex.value + 1)')
+    expect(appSource).not.toContain('await api.setPlaylistIndex(currentVideoIndex.value - 1)')
+    expect(pipSource).not.toContain('await api.setPlaylistIndex(currentIndex.value + 1)')
+    expect(pipSource).not.toContain('await api.setPlaylistIndex(currentIndex.value - 1)')
+  })
+
   test('routes PiP-close ownership regain through a single staged metadata re-entry path', () => {
     const appPath = resolve(__dirname, '../../App.vue')
     const tauriApiPath = resolve(__dirname, '../../api/tauri-commands.ts')
@@ -72,9 +103,7 @@ describe('PipApp command target handling', () => {
     const apiSource = readFileSync(tauriApiPath, 'utf8')
 
     expect(apiSource).toContain("return invoke('reenter_active_playback_metadata')")
-    expect(source).toContain('async function handlePipOwnershipRegained() {')
-    expect(source).toContain('await api.reenterActivePlaybackMetadata()')
-    expect(source).not.toContain('await refreshActivePlayback()\n}')
+    expect(source).toContain('async function handlePipOwnershipRegained() {\n  await api.reenterActivePlaybackMetadata()\n}')
     expect(source).toContain('function handlePlaybackStateChanged() {')
     expect(source).toContain('void refreshActivePlayback()')
     expect(source).toContain('async function handlePipClosed() {')

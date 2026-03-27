@@ -325,6 +325,14 @@ export const api = {
     return invoke('get_playlist_state')
   },
 
+  playNext: async (): Promise<Video | null> => {
+    return invoke('play_next')
+  },
+
+  playPrevious: async (): Promise<Video | null> => {
+    return invoke('play_previous')
+  },
+
   setPlaylistIndex: async (index: number): Promise<void> => {
     return invoke('set_playlist_index', { index })
   },

@@ -90,13 +90,22 @@ const hasNextVideo = computed(() => playerCore.hasNext.value)
 const metadataReady = computed(() => playerCore.metadataReady.value)
 const isPlaying = computed(() => playerCore.isPlaying.value)
 const playerReady = computed(() => playerCore.playerReady.value)
+const playbackSessionKey = computed(() => playerCore.playbackSessionKey.value)
 
-// Watch for video changes from props
-watch(() => props.currentVideo, async (video, oldVideo) => {
-  if (video?.id !== oldVideo?.id) {
-    await playerCore.handleVideoChange(video, props.currentVideoIndex, props.hasNext)
-  }
-}, { immediate: true })
+// Watch for authoritative playback identity changes from props
+watch(
+  () => [
+    props.playlistType,
+    props.playlistVersion,
+    props.currentVideoIndex,
+    props.currentVideo?.id ?? null,
+    props.hasNext,
+  ] as const,
+  async () => {
+    await playerCore.handleVideoChange(props.currentVideo, props.currentVideoIndex, props.hasNext)
+  },
+  { immediate: true },
+)
 
 // Watch for index changes
 watch(() => props.currentVideoIndex, (index) => {
@@ -240,7 +249,7 @@ defineExpose({
               </div>
 
               <div v-else-if="section.section === 'player'" class="video-container">
-                <div class="aspect-ratio-box">
+                <div class="aspect-ratio-box" :key="playbackSessionKey">
                   <iframe
                     :ref="(el) => playerCore.setIframeRef(el as HTMLIFrameElement | null)"
                     :src="`https://embed.nicovideo.jp/watch/${currentVideo.id}?jsapi=1&playerId=1`"
@@ -304,7 +313,7 @@ defineExpose({
 
           <!-- Video Container -->
           <div v-else-if="section.section === 'player'" class="video-container">
-            <div class="aspect-ratio-box">
+            <div class="aspect-ratio-box" :key="playbackSessionKey">
               <div v-if="!currentVideo" class="empty-player">
                 <span>{{ t('player.selectVideo') }}</span>
               </div>

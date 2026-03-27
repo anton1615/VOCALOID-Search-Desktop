@@ -122,15 +122,17 @@ async function initializeAppState() {
 }
 
 async function playNext() {
-  if (currentVideoIndex.value >= 0 && currentVideoIndex.value + 1 < resultsCount.value) {
-    await api.setPlaylistIndex(currentVideoIndex.value + 1)
-  }
+  if (currentVideoIndex.value < 0) return
+
+  await api.playNext()
+  await refreshActivePlayback()
 }
 
 async function playPrevious() {
-  if (currentVideoIndex.value > 0) {
-    await api.setPlaylistIndex(currentVideoIndex.value - 1)
-  }
+  if (currentVideoIndex.value < 0) return
+
+  await api.playPrevious()
+  await refreshActivePlayback()
 }
 
 async function openPip() {

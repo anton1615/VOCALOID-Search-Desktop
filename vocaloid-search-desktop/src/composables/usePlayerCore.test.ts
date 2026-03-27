@@ -1,9 +1,31 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { usePlayerCore } from './usePlayerCore'
+import type { PlaybackIdentityPayload, Video } from '../api/tauri-commands'
 
 const usePlayerEventsMock = vi.fn()
 const fetchUserInfoMock = vi.fn()
 let capturedEventOptions: any = null
+
+function makeVideo(overrides: Partial<Video> = {}): Video {
+  return {
+    id: 'sm9',
+    title: 'selected title',
+    thumbnail_url: null,
+    watch_url: null,
+    view_count: 0,
+    comment_count: 0,
+    mylist_count: 0,
+    like_count: 0,
+    start_time: null,
+    tags: [],
+    duration: null,
+    uploader_id: null,
+    uploader_name: null,
+    description: null,
+    is_watched: false,
+    ...overrides,
+  }
+}
 
 vi.mock('./usePlayerEvents', () => ({
   usePlayerEvents: (options: unknown) => {
@@ -283,6 +305,63 @@ describe('usePlayerCore playback metadata updates', () => {
     })
 
     expect(onPlaybackStateChanged).toHaveBeenCalledTimes(1)
+  })
+
+  test('creates a new player session key when the same video id is rebound to a different list identity', async () => {
+    let playbackIdentity: PlaybackIdentityPayload = {
+      playlistType: 'History' as const,
+      playlistVersion: 4,
+      currentIndex: 1,
+      videoId: 'sm9',
+    }
+
+    const player = usePlayerCore({
+      onPlayNext: vi.fn(),
+      onMarkWatched: vi.fn(),
+      setupEvents: false,
+      getPlaybackIdentity: () => playbackIdentity,
+    })
+
+    await player.handleVideoChange(makeVideo(), 1, true)
+
+    const firstSessionKey = player.playbackSessionKey.value
+
+    playbackIdentity = {
+      playlistType: 'Search',
+      playlistVersion: 8,
+      currentIndex: 0,
+      videoId: 'sm9',
+    }
+
+    await player.handleVideoChange(makeVideo(), 0, false)
+
+    expect(player.playbackSessionKey.value).not.toBe(firstSessionKey)
+  })
+
+  test('keeps metadata pending when cross-list same-id selection arrives before parent props stop reporting the old identity', async () => {
+    const player = usePlayerCore({
+      onPlayNext: vi.fn(),
+      onMarkWatched: vi.fn(),
+      setupEvents: true,
+      getPlaybackIdentity: () => ({
+        playlistType: 'History',
+        playlistVersion: 4,
+        currentIndex: 1,
+        videoId: 'sm9',
+      }),
+    })
+
+    await capturedEventOptions.onVideoSelected({
+      playlist_type: 'Search',
+      playlist_version: 8,
+      index: 1,
+      has_next: false,
+      video: { id: 'sm9', title: 'search title' },
+    })
+
+    expect(player.playerReady.value).toBe(false)
+    expect(player.isPlaying.value).toBe(false)
+    expect(player.metadataReady.value).toBe(false)
   })
 
   test('active-playback-cleared resets local player state and triggers authoritative refresh', async () => {
