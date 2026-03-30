@@ -370,12 +370,6 @@ async function copyToClipboard() {
   white-space: nowrap;
 }
 
-@media (max-width: 420px) {
-  .video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-spacious {
-    gap: var(--space-md);
-  }
-}
-
 .video-meta-panel[data-presentation-mode='compact'].video-meta-panel :deep(.upload-datetime),
 .video-meta-panel[data-presentation-mode='compact'] .upload-datetime {
   line-height: 1.2;
@@ -488,8 +482,18 @@ async function copyToClipboard() {
   gap: var(--space-lg);
 }
 
+.stats-gap-compact {
+  gap: var(--space-sm);
+}
+
 .stats-gap-spacious {
   gap: calc(var(--space-lg) + var(--space-xs));
+}
+
+@media (max-width: 420px) {
+  .video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-compact {
+    gap: calc(var(--space-xs) + 2px);
+  }
 }
 
 .stats-inline-spacing {

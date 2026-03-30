@@ -13,7 +13,7 @@ export type VideoMetaPresentationContract = {
   titleClampLines: 1 | 2
   uploaderClampLines: 1
   avatarSize: 'sm' | 'md'
-  statsGap: 'normal' | 'spacious'
+  statsGap: 'compact' | 'normal' | 'spacious'
   statsInlineSpacing: boolean
   statsFirstInlinePriority: boolean
   uploaderTruncatesBeforeStats: boolean
@@ -55,7 +55,7 @@ const COMPACT_MODE_PRESENTATION_CONTRACT: VideoMetaPresentationContract = {
   titleClampLines: 2,
   uploaderClampLines: 1,
   avatarSize: 'sm',
-  statsGap: 'spacious',
+  statsGap: 'compact',
   statsInlineSpacing: true,
   statsFirstInlinePriority: true,
   uploaderTruncatesBeforeStats: true,

@@ -53,7 +53,7 @@ describe('videoMetaPanelLayout', () => {
       titleClampLines: 2,
       uploaderClampLines: 1,
       avatarSize: 'sm',
-      statsGap: 'spacious',
+      statsGap: 'compact',
       statsInlineSpacing: true,
       statsFirstInlinePriority: true,
       uploaderTruncatesBeforeStats: true,
@@ -70,7 +70,7 @@ describe('videoMetaPanelLayout', () => {
       titleClampLines: 2,
       uploaderClampLines: 1,
       avatarSize: 'sm',
-      statsGap: 'spacious',
+      statsGap: 'compact',
       statsInlineSpacing: true,
       statsFirstInlinePriority: true,
       uploaderTruncatesBeforeStats: true,
@@ -318,6 +318,7 @@ describe('videoMetaPanelLayout', () => {
     expect(source).toContain('.avatar-md')
     expect(source).toContain('.meta-row-emphasized')
     expect(source).toContain('.meta-row-fixed-height')
+    expect(source).toContain('.stats-gap-compact')
     expect(source).toContain('.stats-gap-normal')
     expect(source).toContain('.stats-gap-spacious')
     expect(source).toContain('.stats-inline-spacing')
@@ -419,13 +420,13 @@ describe('videoMetaPanelLayout', () => {
     expect(unifiedPlayerSource).toContain('min-height: 86px;')
   })
 
-  test('PiP compact contract keeps uploader on one line and applies wider stat spacing', () => {
+  test('PiP compact contract keeps uploader on one line and applies tighter stat spacing', () => {
     const videoMetaPanelPath = resolve(__dirname, '../../components/VideoMetaPanel.vue')
     const source = readFileSync(videoMetaPanelPath, 'utf8')
 
     expect(source).toContain('.uploader-clamp-1')
     expect(source).toContain('.avatar-sm')
-    expect(source).toContain('.stats-gap-spacious')
+    expect(source).toContain('.stats-gap-compact')
     expect(source).toContain('.stats-inline-spacing')
   })
 
@@ -454,8 +455,14 @@ describe('videoMetaPanelLayout', () => {
     const source = readFileSync(videoMetaPanelPath, 'utf8')
 
     expect(source).toContain("@media (max-width: 420px)")
-    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-spacious")
-    expect(source).toContain('gap: var(--space-md);')
+    expect(source).toContain(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-compact")
+    expect(source).toContain('gap: calc(var(--space-xs) + 2px);')
+
+    const compactGapRuleIndex = source.indexOf('.stats-gap-compact {')
+    const compactMediaRuleIndex = source.indexOf(".video-meta-panel[data-presentation-mode='compact'][data-stats-inline-priority='stats-first'] .stats-gap-compact")
+
+    expect(compactGapRuleIndex).toBeGreaterThanOrEqual(0)
+    expect(compactMediaRuleIndex).toBeGreaterThan(compactGapRuleIndex)
   })
 
   test('PiP pending header keeps a compact frame without falling back to the full-mode shell reservation', () => {
