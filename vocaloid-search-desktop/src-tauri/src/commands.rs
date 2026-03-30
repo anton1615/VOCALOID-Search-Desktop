@@ -221,6 +221,7 @@ fn resolve_explicit_selection(
     ))
 }
 
+#[cfg(test)]
 fn advance_active_playback(state: &AppState, delta: isize) -> Option<Video> {
     let active_playback = state.active_playback.read();
     let playback = active_playback.as_ref()?.clone();
@@ -236,6 +237,40 @@ fn advance_active_playback(state: &AppState, delta: isize) -> Option<Video> {
     let next_index = next_index as usize;
     state.set_active_playback_index(next_index);
     results.get(next_index).cloned()
+}
+
+fn advance_active_playback_selection(
+    state: &AppState,
+    delta: isize,
+) -> Option<(VideoSelectedPayload, PlaybackEnrichmentRequest)> {
+    let active_playback = state.active_playback.read();
+    let playback = active_playback.as_ref()?.clone();
+    drop(active_playback);
+
+    let results = state.get_list_context_items(&playback.list_id);
+    let next_index = playback.current_index as isize + delta;
+
+    if next_index < 0 || next_index as usize >= results.len() {
+        return None;
+    }
+
+    let next_index = next_index as usize;
+    let video = results.get(next_index)?.clone();
+    let has_next = next_index + 1 < results.len();
+    let playlist_type = PlaylistType::from(&playback.list_id);
+    let playlist_version = playback.list_version;
+    let list_id = playback.list_id;
+
+    Some((
+        VideoSelectedPayload {
+            video: video.clone(),
+            index: next_index,
+            has_next,
+            playlist_type,
+            playlist_version,
+        },
+        build_playback_enrichment_request(list_id, playlist_version, next_index, video),
+    ))
 }
 
 fn snapshot_thumbnail_url(snapshot_video: &SnapshotVideo) -> Option<String> {
@@ -2119,16 +2154,30 @@ pub async fn select_video(
 
 #[tauri::command]
 pub async fn play_next(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
-    Ok(advance_active_playback(&state, 1))
+    let Some((selected_payload, enrichment_request)) = advance_active_playback_selection(&state, 1) else {
+        return Ok(None);
+    };
+    let selected_video = selected_payload.video.clone();
+    state.set_active_playback_index(selected_payload.index);
+    emit_video_selected_and_spawn_enrichment(&app, selected_payload, enrichment_request)?;
+    Ok(Some(selected_video))
 }
 
 #[tauri::command]
 pub async fn play_previous(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<Video>, String> {
-    Ok(advance_active_playback(&state, -1))
+    let Some((selected_payload, enrichment_request)) = advance_active_playback_selection(&state, -1) else {
+        return Ok(None);
+    };
+    let selected_video = selected_payload.video.clone();
+    state.set_active_playback_index(selected_payload.index);
+    emit_video_selected_and_spawn_enrichment(&app, selected_payload, enrichment_request)?;
+    Ok(Some(selected_video))
 }
 #[tauri::command]
 pub fn get_database_path(
@@ -3037,6 +3086,72 @@ mod tests {
         assert_eq!(active.list_id, ListContextId::WatchLater);
         assert_eq!(active.list_version, watch_later_version);
         assert_eq!(active.current_index, 0);
+    }
+
+    #[test]
+    fn next_navigation_reentry_uses_updated_active_playback_identity() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::History,
+            vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm3")],
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let history_version = test.state.get_list_context_version(&ListContextId::History);
+        test.state
+            .set_active_playback(ListContextId::History, history_version, 0);
+
+        let (selected_payload, enrichment_request) = advance_active_playback_selection(&test.state, 1)
+            .expect("selection should resolve");
+
+        assert_eq!(selected_payload.playlist_type, PlaylistType::History);
+        assert_eq!(selected_payload.playlist_version, history_version);
+        assert_eq!(selected_payload.index, 1);
+        assert_eq!(selected_payload.video.id, "sm2");
+        assert_eq!(enrichment_request.list_id, ListContextId::History);
+        assert_eq!(enrichment_request.playlist_version, history_version);
+        assert_eq!(enrichment_request.index, 1);
+        assert_eq!(enrichment_request.video.id, "sm2");
+    }
+
+    #[test]
+    fn previous_navigation_reentry_uses_updated_active_playback_identity() {
+        let test = TestAppState::new();
+        test.state.update_list_context(
+            ListContextId::WatchLater,
+            vec![sample_video("sm1"), sample_video("sm2"), sample_video("sm3")],
+            1,
+            50,
+            false,
+            3,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let watch_later_version = test.state.get_list_context_version(&ListContextId::WatchLater);
+        test.state
+            .set_active_playback(ListContextId::WatchLater, watch_later_version, 2);
+
+        let (selected_payload, enrichment_request) = advance_active_playback_selection(&test.state, -1)
+            .expect("selection should resolve");
+
+        assert_eq!(selected_payload.playlist_type, PlaylistType::WatchLater);
+        assert_eq!(selected_payload.playlist_version, watch_later_version);
+        assert_eq!(selected_payload.index, 1);
+        assert_eq!(selected_payload.video.id, "sm2");
+        assert_eq!(enrichment_request.list_id, ListContextId::WatchLater);
+        assert_eq!(enrichment_request.playlist_version, watch_later_version);
+        assert_eq!(enrichment_request.index, 1);
+        assert_eq!(enrichment_request.video.id, "sm2");
     }
 
     #[test]

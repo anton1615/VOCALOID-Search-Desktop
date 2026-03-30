@@ -36,15 +36,17 @@ The system SHALL provide playback controls in the PiP window that synchronize wi
 
 #### Scenario: Skip to next video from PiP
 - **WHEN** user clicks "next" button in PiP window
-- **THEN** PiP calls `set_playlist_index(currentIndex + 1)`
-- **AND** the backend broadcasts `video-selected` event
+- **THEN** PiP triggers backend playback navigation against the active playback list context
+- **AND** the backend broadcasts `video-selected` for the resolved next playback identity
 - **AND** both PiP and main window update to show the new video
+- **AND** later playback metadata enrichment follows the same staged update contract used by explicit list selection
 
 #### Scenario: Previous video from PiP
 - **WHEN** user clicks "previous" button in PiP window
-- **THEN** PiP calls `set_playlist_index(currentIndex - 1)`
-- **AND** the backend broadcasts `video-selected` event
+- **THEN** PiP triggers backend playback navigation against the active playback list context
+- **AND** the backend broadcasts `video-selected` for the resolved previous playback identity
 - **AND** both windows update to show the previous video
+- **AND** later playback metadata enrichment follows the same staged update contract used by explicit list selection
 
 #### Scenario: Select video from main window while PiP is open
 - **WHEN** PiP window is open
@@ -145,6 +147,11 @@ The system SHALL keep the PiP compact header shell height stable while allowing 
 - **THEN** the PiP header SHALL use the compact two-line presentation variant
 - **AND** the PiP header SHALL preserve the same fixed shell height used by the single-line variant
 - **AND** the embedded player position SHALL remain stable
+
+#### Scenario: Shared metadata colors stay aligned with main window in PiP
+- **WHEN** the PiP window renders the shared metadata panel description region
+- **THEN** description text and sanitized links SHALL use the same shared metadata color contract as the main window surface
+- **AND** the compact presentation SHALL NOT fall back to a PiP-only default link color for that shared metadata content
 
 #### Scenario: Constrained compact meta row keeps stats inline and truncates uploader first
 - **WHEN** the PiP compact header has limited horizontal space in the uploader/stats row

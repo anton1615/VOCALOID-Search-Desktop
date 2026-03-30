@@ -88,7 +88,6 @@ async function playNext() {
     }
 
     await api.playNext()
-    await refreshActivePlayback()
   } catch (e) {
     console.error('[PiP] playNext failed:', e)
   }
@@ -98,7 +97,6 @@ async function playPrevious() {
   if (currentIndex.value < 0) return
 
   await api.playPrevious()
-  await refreshActivePlayback()
 }
 
 function handleVideoWatched(video: Video) {

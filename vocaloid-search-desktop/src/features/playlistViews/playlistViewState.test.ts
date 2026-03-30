@@ -282,6 +282,23 @@ describe('playlistViewState shared logic', () => {
     expect(watchLaterSource).toContain("listen<PlaybackVideoUpdatedPayload>('playback-video-updated'")
   })
 
+  test('all playlist views reuse the shared scroll helper for navigation-driven selection updates', () => {
+    const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')
+    const historyViewPath = resolve(__dirname, '../../views/HistoryView.vue')
+    const watchLaterViewPath = resolve(__dirname, '../../views/WatchLaterView.vue')
+
+    const searchSource = readFileSync(searchViewPath, 'utf8')
+    const historySource = readFileSync(historyViewPath, 'utf8')
+    const watchLaterSource = readFileSync(watchLaterViewPath, 'utf8')
+
+    expect(searchSource).toContain('scrollVideoIntoView(payload.index, listContainerRef.value)')
+    expect(historySource).toContain("scrollVideoIntoView(payload.index, document.querySelector('.video-list') as HTMLElement | null)")
+    expect(watchLaterSource).toContain("scrollVideoIntoView(payload.index, document.querySelector('.video-list') as HTMLElement | null)")
+    expect(searchSource).not.toContain('const nextNextVideoElement = document.getElementById(\'video-\' + (payload.index + 2))')
+    expect(historySource).not.toContain('const nextNextVideoElement = document.getElementById(\'video-\' + (payload.index + 2))')
+    expect(watchLaterSource).not.toContain('const nextNextVideoElement = document.getElementById(\'video-\' + (payload.index + 2))')
+  })
+
   test('playlist metadata update handlers do not perform selection-only side effects', () => {
     const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')
     const historyViewPath = resolve(__dirname, '../../views/HistoryView.vue')

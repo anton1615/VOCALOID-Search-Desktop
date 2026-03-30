@@ -76,6 +76,7 @@ The system SHALL define main-window and PiP metadata presentation differences th
 - **WHEN** UnifiedPlayer renders metadata details in either `full` or `compact` mode
 - **THEN** the shared contract SHALL define URL treatment for that mode
 - **AND** a divider between tags and description SHALL appear only when both content regions exist
+- **AND** sanitized description links SHALL use the shared metadata accent styling contract in both modes
 - **AND** the contract SHALL be observable through stable DOM markers or classes so the behavior is testable
 
 ### Requirement: Player controls sub-component

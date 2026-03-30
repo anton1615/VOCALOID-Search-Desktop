@@ -585,6 +585,15 @@ async function copyToClipboard() {
   line-height: 1.6;
 }
 
+.description-content :deep(a) {
+  color: var(--color-accent-primary);
+  text-decoration: underline;
+}
+
+.description-content :deep(a:hover) {
+  color: var(--color-accent-secondary);
+}
+
 .description-content.collapsed {
   display: -webkit-box;
   -webkit-line-clamp: 4;

@@ -96,6 +96,42 @@ describe('PipApp command target handling', () => {
     expect(pipSource).not.toContain('await api.setPlaylistIndex(currentIndex.value - 1)')
   })
 
+  test('relies on shared playback events instead of immediate post-navigation refresh in main and PiP shells', () => {
+    const appPath = resolve(__dirname, '../../App.vue')
+    const pipAppPath = resolve(__dirname, '../../PipApp.vue')
+    const appSource = readFileSync(appPath, 'utf8')
+    const pipSource = readFileSync(pipAppPath, 'utf8')
+
+    expect(appSource).toContain('await api.playNext()')
+    expect(appSource).toContain('await api.playPrevious()')
+    expect(appSource).not.toContain('await api.playNext()\n  await refreshActivePlayback()')
+    expect(appSource).not.toContain('await api.playPrevious()\n  await refreshActivePlayback()')
+
+    expect(pipSource).toContain('await api.playNext()')
+    expect(pipSource).toContain('await api.playPrevious()')
+    expect(pipSource).not.toContain('await api.playNext()\n    await refreshActivePlayback()')
+    expect(pipSource).not.toContain('await api.playPrevious()\n  await refreshActivePlayback()')
+  })
+
+  test('backend previous and next commands reuse the shared selection-and-enrichment event path', () => {
+    const commandsPath = resolve(__dirname, '../../../src-tauri/src/commands.rs')
+    const source = readFileSync(commandsPath, 'utf8')
+
+    const playNextBlock = source.slice(
+      source.indexOf('pub async fn play_next('),
+      source.indexOf('#[tauri::command]\npub async fn play_previous('),
+    )
+    const playPreviousBlock = source.slice(
+      source.indexOf('pub async fn play_previous('),
+      source.indexOf('#[tauri::command]\npub fn get_database_path('),
+    )
+
+    expect(playNextBlock).toContain('emit_video_selected_and_spawn_enrichment')
+    expect(playPreviousBlock).toContain('emit_video_selected_and_spawn_enrichment')
+    expect(playNextBlock).not.toContain('Ok(advance_active_playback(&state, 1))')
+    expect(playPreviousBlock).not.toContain('Ok(advance_active_playback(&state, -1))')
+  })
+
   test('routes PiP-close ownership regain through a single staged metadata re-entry path', () => {
     const appPath = resolve(__dirname, '../../App.vue')
     const tauriApiPath = resolve(__dirname, '../../api/tauri-commands.ts')

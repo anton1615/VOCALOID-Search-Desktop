@@ -125,14 +125,12 @@ async function playNext() {
   if (currentVideoIndex.value < 0) return
 
   await api.playNext()
-  await refreshActivePlayback()
 }
 
 async function playPrevious() {
   if (currentVideoIndex.value < 0) return
 
   await api.playPrevious()
-  await refreshActivePlayback()
 }
 
 async function openPip() {

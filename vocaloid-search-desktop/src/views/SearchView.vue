@@ -386,39 +386,7 @@ onMounted(async () => {
     }
     currentVideo.value = payload.video
     currentVideoIndex.value = payload.index
-
-    // Scroll logic: keep videos visible above and below
-    const videoElement = document.getElementById('video-' + payload.index)
-    const prevVideoElement = document.getElementById('video-' + (payload.index - 1))
-    const nextNextVideoElement = document.getElementById('video-' + (payload.index + 2))
-    const listContainer = listContainerRef.value
-    
-    if (listContainer) {
-      const containerRect = listContainer.getBoundingClientRect()
-      
-      // Check if we need to scroll up (previous video not visible)
-      if (prevVideoElement && payload.index > 0) {
-        const prevRect = prevVideoElement.getBoundingClientRect()
-        if (prevRect.top < containerRect.top) {
-          // Previous video is above visible area, scroll to show it
-          prevVideoElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-      }
-      
-      // Check if we need to scroll down (video 2 positions below not visible)
-      if (nextNextVideoElement) {
-        const nextNextRect = nextNextVideoElement.getBoundingClientRect()
-        if (nextNextRect.bottom > containerRect.bottom) {
-          nextNextVideoElement.scrollIntoView({ behavior: 'smooth', block: 'end' })
-        }
-      } else if (videoElement) {
-        // Less than 2 videos below, just scroll current into view
-        const videoRect = videoElement.getBoundingClientRect()
-        if (videoRect.bottom > containerRect.bottom || videoRect.top < containerRect.top) {
-          videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
-      }
-    }
+    scrollVideoIntoView(payload.index, listContainerRef.value)
     
     // Preload more results when approaching end of list
     if (shouldPreloadMore({
@@ -1538,11 +1506,6 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
   display: block;
   content: "";
   margin-bottom: 0.3em;
-}
-
-.description-content :deep(a) {
-  color: var(--color-accent-primary);
-  text-decoration: underline;
 }
 
 .expand-btn {

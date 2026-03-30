@@ -488,4 +488,34 @@ describe('videoMetaPanelLayout', () => {
     expect(source).toContain('observeDescriptionToggleResize')
     expect(source).toContain('onBeforeUnmount')
   })
+
+  test('VideoMetaPanel owns sanitized description link styling through the shared metadata surface', () => {
+    const videoMetaPanelPath = resolve(__dirname, '../../components/VideoMetaPanel.vue')
+    const searchViewPath = resolve(__dirname, '../../views/SearchView.vue')
+    const videoMetaPanelSource = readFileSync(videoMetaPanelPath, 'utf8')
+    const searchViewSource = readFileSync(searchViewPath, 'utf8')
+
+    expect(videoMetaPanelSource).toContain('.description-content :deep(a)')
+    expect(videoMetaPanelSource).toContain('color: var(--color-accent-primary);')
+    expect(videoMetaPanelSource).toContain('text-decoration: underline;')
+    expect(videoMetaPanelSource).toContain('.description-content :deep(a:hover)')
+    expect(videoMetaPanelSource).toContain('color: var(--color-accent-secondary);')
+    expect(searchViewSource).not.toContain('.description-content :deep(a)')
+  })
+
+  test('PiP style defines the shared metadata tokens consumed by VideoMetaPanel', () => {
+    const pipStylePath = resolve(__dirname, '../../pip-style.css')
+    const source = readFileSync(pipStylePath, 'utf8')
+
+    expect(source).toContain('--color-accent-primary: #14b8a6;')
+    expect(source).toContain('--color-accent-secondary: #0d9488;')
+    expect(source).toContain('--color-text-secondary-light: #c0c0d0;')
+    expect(source).toContain('--font-size-sm: 14px;')
+    expect(source).toContain('--font-size-lg: 18px;')
+    expect(source).toContain('--space-sm: 8px;')
+    expect(source).toContain('--space-md: 12px;')
+    expect(source).toContain('--space-lg: 16px;')
+    expect(source).toContain('--bg-surface: var(--color-bg-surface);')
+    expect(source).toContain('--text-primary: var(--color-text-primary);')
+  })
 })

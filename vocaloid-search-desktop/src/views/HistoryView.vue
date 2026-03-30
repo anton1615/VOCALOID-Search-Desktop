@@ -187,35 +187,8 @@ onMounted(async () => {
     }
     currentVideoIndex.value = payload.index
     currentVideo.value = payload.video
-    
-    // Scroll logic: keep videos visible above and below
-    const videoElement = document.getElementById('video-' + payload.index)
-    const prevVideoElement = document.getElementById('video-' + (payload.index - 1))
-    const nextNextVideoElement = document.getElementById('video-' + (payload.index + 2))
-    const listContainer = document.querySelector('.video-list')
-    
-    if (listContainer) {
-      const containerRect = listContainer.getBoundingClientRect()
-      
-      if (prevVideoElement && payload.index > 0) {
-        const prevRect = prevVideoElement.getBoundingClientRect()
-        if (prevRect.top < containerRect.top) {
-          prevVideoElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-      }
-      
-      if (nextNextVideoElement) {
-        const nextNextRect = nextNextVideoElement.getBoundingClientRect()
-        if (nextNextRect.bottom > containerRect.bottom) {
-          nextNextVideoElement.scrollIntoView({ behavior: 'smooth', block: 'end' })
-        }
-      } else if (videoElement) {
-        const videoRect = videoElement.getBoundingClientRect()
-        if (videoRect.bottom > containerRect.bottom || videoRect.top < containerRect.top) {
-          videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
-      }
-    }
+
+    scrollVideoIntoView(payload.index, document.querySelector('.video-list') as HTMLElement | null)
   })
 
   unlistenPlaybackVideoUpdated = await listen<PlaybackVideoUpdatedPayload>('playback-video-updated', async (event) => {
