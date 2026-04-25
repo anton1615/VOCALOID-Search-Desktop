@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, inject, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, type ScraperConfig, type ScraperProgress, type DatabaseStats, type StorageInfo, type SyncPreflightEstimate } from '../api/tauri-commands'
+import { open } from '@tauri-apps/plugin-dialog'
+import {
+  api,
+  type ScraperConfig,
+  type ScraperProgress,
+  type DatabaseStats,
+  type StorageInfo,
+  type SyncPreflightEstimate,
+  type WatchDataImportPreviewResponse,
+  type WatchDataImportCompleted,
+} from '../api/tauri-commands'
 import { formatDateTime } from '../utils/dateTime'
 import { formatStorageSize, formatVideoCount } from '../features/playlistViews/scraperFormatting'
 
@@ -32,6 +42,14 @@ const freshnessStatus = inject<Ref<{ message: string; isFresh: boolean; localLas
 const storageInfo = ref<StorageInfo | null>(null)
 const preflightEstimate = ref<SyncPreflightEstimate | null>(null)
 const preflightLoading = ref(false)
+const showImportConfirm = ref(false)
+const selectedImportPath = ref('')
+const importPreview = ref<WatchDataImportPreviewResponse | null>(null)
+const importSuccess = ref<WatchDataImportCompleted | null>(null)
+const importError = ref('')
+const importPreviewLoading = ref(false)
+const importExecuteLoading = ref(false)
+
 const isStorageInsufficient = computed(() => {
   const estimated = preflightEstimate.value?.estimated_database_size_kb
   const free = preflightEstimate.value?.free_space_kb
@@ -39,6 +57,11 @@ const isStorageInsufficient = computed(() => {
     return false
   }
   return estimated > free
+})
+
+const selectedImportFileName = computed(() => {
+  if (!selectedImportPath.value) return ''
+  return selectedImportPath.value.split(/[/\\]/).pop() ?? selectedImportPath.value
 })
 
 async function loadStorageInfo() {
@@ -108,6 +131,67 @@ async function cancelSync() {
   }
 }
 
+function closeImportModal() {
+  selectedImportPath.value = ''
+  showImportConfirm.value = false
+}
+
+async function selectWatchDataImportFile() {
+  importError.value = ''
+  importSuccess.value = null
+  importPreview.value = null
+  importPreviewLoading.value = true
+
+  try {
+    const selectedPath = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] }],
+    })
+
+    if (!selectedPath || Array.isArray(selectedPath)) {
+      selectedImportPath.value = ''
+      return
+    }
+
+    selectedImportPath.value = selectedPath
+    importPreview.value = await api.previewWatchDataImport(selectedPath)
+    showImportConfirm.value = true
+  } catch (error) {
+    importError.value = error instanceof Error ? error.message : t('scraper.importPreviewError')
+    console.error('Failed to preview watch-data import:', error)
+  } finally {
+    importPreviewLoading.value = false
+  }
+}
+
+async function confirmWatchDataImport() {
+  if (!selectedImportPath.value || !importPreview.value) return
+
+  importExecuteLoading.value = true
+  importError.value = ''
+
+  try {
+    importSuccess.value = await api.executeWatchDataImport({
+      path: selectedImportPath.value,
+      fingerprint: importPreview.value.fingerprint,
+      confirmation_token: importPreview.value.confirmation_token,
+      confirmed_summary: {
+        file_name: importPreview.value.file_name,
+        history: importPreview.value.history,
+        watch_later: importPreview.value.watch_later,
+      },
+    })
+    showImportConfirm.value = false
+    await loadStats()
+  } catch (error) {
+    importError.value = error instanceof Error ? error.message : t('scraper.importExecuteError')
+    console.error('Failed to execute watch-data import:', error)
+  } finally {
+    importExecuteLoading.value = false
+  }
+}
+
 function startPolling() {
   progressPollInterval.value = window.setInterval(async () => {
     try {
@@ -130,13 +214,13 @@ function stopPolling() {
   }
 }
 
-const categoryOptions = [
+const categoryOptions = computed(() => [
   { value: null, label: t('scraper.categoryNone') },
-  { value: 'MUSIC', label: '音樂' },
-  { value: 'GAME', label: '遊戲' },
-  { value: 'ANIME', label: '動畫' },
-  { value: 'ENTERTAINMENT', label: '娛樂' },
-  { value: 'DANCE', label: '舞蹈' },
+  { value: 'MUSIC', label: t('scraper.categoryMusic') },
+  { value: 'GAME', label: t('scraper.categoryGame') },
+  { value: 'ANIME', label: t('scraper.categoryAnime') },
+  { value: 'ENTERTAINMENT', label: t('scraper.categoryEntertainment') },
+  { value: 'DANCE', label: t('scraper.categoryDance') },
   { value: 'ANIMAL', label: t('scraper.categoryAnimal') },
   { value: 'NATURE', label: t('scraper.categoryNature') },
   { value: 'COOKING', label: t('scraper.categoryCooking') },
@@ -146,27 +230,27 @@ const categoryOptions = [
   { value: 'SOCIAL', label: t('scraper.categorySocial') },
   { value: 'TECHNICAL', label: t('scraper.categoryTechnical') },
   { value: 'LECTURE', label: t('scraper.categoryLecture') },
-  { value: 'OTHER', label: '其他' },
+  { value: 'OTHER', label: t('scraper.categoryOther') },
   { value: 'RADIO', label: t('scraper.categoryRadio') },
-]
+])
 
-const targetOptions = [
-  { value: 'tags', label: '標籤' },
-  { value: 'tagsExact', label: '標籤 (精確)' },
-  { value: 'title', label: '標題' },
-  { value: 'description', label: '描述' },
-  { value: 'tags,title', label: '標籤 + 標題' },
-]
+const targetOptions = computed(() => [
+  { value: 'tags', label: t('scraper.targetTags') },
+  { value: 'tagsExact', label: t('scraper.targetTagsExact') },
+  { value: 'title', label: t('scraper.targetTitle') },
+  { value: 'description', label: t('scraper.targetDescription') },
+  { value: 'tags,title', label: t('scraper.targetTagsTitle') },
+])
 
 onMounted(async () => {
   await loadConfig()
   await loadStats()
   await loadStorageInfo()
-  
+
   try {
     const currentProgress = await api.getScraperProgress()
     progress.value = currentProgress
-    
+
     if (currentProgress.is_running) {
       startPolling()
     }
@@ -183,14 +267,14 @@ onUnmounted(() => {
 <template>
   <div class="scraper-view">
     <h2>{{ t('scraper.title') }}</h2>
-    
+
     <div v-if="freshnessStatus?.message && !freshnessStatus.isFresh" class="alert alert-warning status-card">
       <div class="status-title">
         {{ stats.total_videos > 0 ? t('scraper.updateAvailableTitle') : t('scraper.emptyDatabaseTitle') }}
       </div>
       <div class="status-message">{{ freshnessStatus.message }}</div>
     </div>
-    
+
     <div class="stats-card">
       <div class="stat">
         <span class="label">{{ t('scraper.totalVideos') }}</span>
@@ -203,7 +287,7 @@ onUnmounted(() => {
         </span>
       </div>
     </div>
-    
+
     <div v-if="storageInfo" class="path-info">
       <h3>{{ t('scraper.storageTitle') }}</h3>
       <div class="storage-row">
@@ -212,20 +296,48 @@ onUnmounted(() => {
       </div>
       <p class="storage-description">{{ t('scraper.storageDescription') }}</p>
     </div>
-    
+
+    <div class="path-info import-card">
+      <h3>{{ t('scraper.importTitle') }}</h3>
+      <p class="storage-description">
+        {{ t('scraper.importDescription') }}
+      </p>
+      <div v-if="selectedImportFileName" class="storage-row">
+        <span class="label">{{ t('scraper.importSelectedFile') }}</span>
+        <code>{{ selectedImportFileName }}</code>
+      </div>
+      <div v-if="importSuccess" class="alert alert-success import-status">
+        {{
+          t('scraper.importSuccess', {
+            fileName: importSuccess.file_name,
+            historyAdded: importSuccess.history.add,
+            watchLaterAdded: importSuccess.watch_later.add,
+          })
+        }}
+      </div>
+      <div v-else-if="importError" class="alert alert-danger import-status">
+        {{ importError }}
+      </div>
+      <div class="import-actions">
+        <button @click="selectWatchDataImportFile" class="btn-secondary" :disabled="importPreviewLoading || importExecuteLoading">
+          {{ importPreviewLoading ? t('scraper.importPreviewLoading') : t('scraper.importChooseFile') }}
+        </button>
+      </div>
+    </div>
+
     <div class="config-form">
       <h3>{{ t('scraper.syncSettings') }}</h3>
-      
+
       <div class="form-group">
         <label>{{ t('scraper.searchKeyword') }}</label>
         <input
           v-model="config.query"
           type="text"
           @change="saveConfig"
-          placeholder="VOCALOID, UTAU, CeVIO..."
+          :placeholder="t('scraper.searchKeywordPlaceholder')"
         />
       </div>
-      
+
       <div class="form-row">
         <div class="form-group">
           <label>{{ t('scraper.maxDays') }}</label>
@@ -233,11 +345,11 @@ onUnmounted(() => {
             v-model.number="config.max_age_days"
             type="number"
             @change="saveConfig"
-            placeholder="0 = unlimited"
+            :placeholder="t('scraper.maxDaysPlaceholder')"
           />
-          <span class="hint">0 = unlimited</span>
+          <span class="hint">{{ t('scraper.maxDaysHint') }}</span>
         </div>
-        
+
         <div class="form-group">
           <label>{{ t('scraper.category') }}</label>
           <select v-model="config.category_filter" @change="saveConfig">
@@ -246,7 +358,7 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        
+
         <div class="form-group">
           <label>{{ t('scraper.searchTarget') }}</label>
           <select v-model="config.targets" @change="saveConfig">
@@ -257,7 +369,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    
+
     <div class="actions">
       <button
         v-if="!progress.is_running"
@@ -274,7 +386,7 @@ onUnmounted(() => {
         {{ t('scraper.cancelSync') }}
       </button>
     </div>
-    
+
     <div v-if="progress.is_running || progress.status !== 'idle'" class="progress-card">
       <h3>{{ t('scraper.syncProgress') }}</h3>
       <div class="progress-info">
@@ -298,7 +410,7 @@ onUnmounted(() => {
         ></div>
       </div>
     </div>
-    
+
     <div v-if="showConfirm" class="modal-backdrop" @click.self="showConfirm = false">
       <div class="modal">
         <h3>{{ t('scraper.startSync') }}</h3>
@@ -324,7 +436,51 @@ onUnmounted(() => {
         </template>
         <div class="modal-actions">
           <button @click="showConfirm = false" class="btn-secondary">{{ t('scraper.cancel') }}</button>
-          <button v-if="!isStorageInsufficient" @click="runScraper" class="btn-primary">OK</button>
+          <button v-if="!isStorageInsufficient" @click="runScraper" class="btn-primary">{{ t('scraper.syncConfirmAction') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showImportConfirm" class="modal-backdrop" @click.self="showImportConfirm = false">
+      <div class="modal import-modal">
+        <h3>{{ t('scraper.importTitle') }}</h3>
+        <p>{{ t('scraper.importReviewDescription') }}</p>
+        <div v-if="importPreview" class="import-preview-grid">
+          <div class="modal-info-row">
+            <span>{{ t('scraper.importSelectedFile') }}</span>
+            <strong>{{ importPreview.file_name }}</strong>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.importHistoryRows') }}</span>
+            <strong>{{ importPreview.history.imported }}</strong>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.importWatchLaterRows') }}</span>
+            <strong>{{ importPreview.watch_later.imported }}</strong>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.importHistoryCounts', { preserve: importPreview.history.preserve, overwrite: importPreview.history.overwrite, add: importPreview.history.add }) }}</span>
+          </div>
+          <div class="modal-info-row">
+            <span>{{ t('scraper.importWatchLaterCounts', { preserve: importPreview.watch_later.preserve, overwrite: importPreview.watch_later.overwrite, add: importPreview.watch_later.add }) }}</span>
+          </div>
+          <div class="import-disclosure">
+            <strong>{{ t('scraper.importPreservedDataTitle') }}</strong>
+            <p>{{ t('scraper.importPreservedDataDescription') }}</p>
+          </div>
+          <div class="import-disclosure">
+            <strong>{{ t('scraper.importHistoryOrderingTitle') }}</strong>
+            <p>{{ t('scraper.importHistoryOrderingDescription') }}</p>
+          </div>
+        </div>
+        <div v-if="importError" class="alert alert-danger import-status">
+          {{ importError }}
+        </div>
+        <div class="modal-actions">
+          <button @click="closeImportModal" class="btn-secondary" :disabled="importExecuteLoading">{{ t('scraper.cancel') }}</button>
+          <button @click="confirmWatchDataImport" class="btn-primary" :disabled="!importPreview || importExecuteLoading">
+            {{ importExecuteLoading ? t('scraper.importExecuting') : t('scraper.importConfirm') }}
+          </button>
         </div>
       </div>
     </div>
@@ -359,6 +515,12 @@ h2 {
   background: rgba(220, 53, 69, 0.12);
   border: 1px solid rgba(220, 53, 69, 0.35);
   color: #ff808f;
+}
+
+.alert-success {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #86efac;
 }
 
 .status-card {
@@ -527,6 +689,13 @@ h3 {
   cursor: pointer;
 }
 
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .progress-card {
   padding: 1.5rem;
   background: var(--bg-surface);
@@ -590,5 +759,45 @@ h3 {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.import-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.import-status {
+  margin-bottom: 0;
+}
+
+.import-modal {
+  max-width: 560px;
+}
+
+.import-preview-grid {
+  margin-bottom: 1rem;
+}
+
+.import-disclosure {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  margin-bottom: 0.75rem;
+}
+
+.import-disclosure strong {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.import-disclosure p {
+  margin: 0;
 }
 </style>

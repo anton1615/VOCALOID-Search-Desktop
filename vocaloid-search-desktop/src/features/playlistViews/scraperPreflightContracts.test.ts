@@ -20,6 +20,20 @@ describe('scraper preflight contracts', () => {
     expect(source).toContain("return invoke('get_sync_preflight_estimate')")
   })
 
+  test('wires the dialog plugin for page-local file selection', () => {
+    const packageJsonPath = resolve(__dirname, '../../../package.json')
+    const cargoTomlPath = resolve(__dirname, '../../../src-tauri/Cargo.toml')
+    const libPath = resolve(__dirname, '../../../src-tauri/src/lib.rs')
+    const packageJson = readFileSync(packageJsonPath, 'utf8')
+    const cargoToml = readFileSync(cargoTomlPath, 'utf8')
+    const libSource = readFileSync(libPath, 'utf8')
+
+    expect(packageJson).toContain('"@tauri-apps/plugin-dialog": "^2.2.0"')
+    expect(cargoToml).toContain('tauri-plugin-dialog = "2"')
+    expect(libSource).toContain('.plugin(tauri_plugin_dialog::init())')
+    expect(libSource).toContain('.plugin(tauri_plugin_shell::init())')
+  })
+
   test('registers storage info and preflight estimate tauri commands', () => {
     const libPath = resolve(__dirname, '../../../src-tauri/src/lib.rs')
     const source = readFileSync(libPath, 'utf8')

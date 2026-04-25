@@ -173,11 +173,16 @@ function stopDrag() {
 }
 
 let unlistenPipClosed: (() => void) | null = null
+let unlistenWatchDataImportComplete: (() => void) | null = null
 
 onMounted(async () => {
   try {
     await initializeAppState()
     unlistenPipClosed = await listen('pip-closed', handlePipClosed)
+    unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
+      console.log('[App] Received watch-data-import-complete event')
+      await refreshActivePlayback()
+    })
   } catch (e) {
     handleFreshnessCheckError(e)
   } finally {
@@ -187,6 +192,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unlistenPipClosed) unlistenPipClosed()
+  if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
   stopDrag()
 })
 </script>
@@ -229,7 +235,7 @@ onUnmounted(() => {
     <main class="main-content">
       <div v-if="isLoading" class="loading">
         <div class="spinner"></div>
-        <p>載入中...</p>
+        <p>{{ t('history.loading') }}</p>
       </div>
       <template v-else-if="showsSplitLayout">
         <div class="split-layout" ref="splitLayoutRef">

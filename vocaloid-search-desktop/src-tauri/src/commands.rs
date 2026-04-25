@@ -66,6 +66,31 @@ fn emit_active_playback_cleared(app: &AppHandle, list_id: &ListContextId) -> Res
         .map_err(|e| e.to_string())
 }
 
+fn finalize_watch_data_import_post_commit(
+    completed: WatchDataImportCompleted,
+    refresh: impl FnOnce() -> Result<Option<ListContextId>, String>,
+    emit_cleared: impl FnOnce(&ListContextId) -> Result<(), String>,
+    emit_complete: impl FnOnce(&WatchDataImportCompleted) -> Result<(), String>,
+) -> WatchDataImportCompleted {
+    match refresh() {
+        Ok(Some(cleared_list_id)) => {
+            if let Err(error) = emit_cleared(&cleared_list_id) {
+                eprintln!("watch-data import committed but failed to emit active-playback-cleared: {error}");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("watch-data import committed but failed to refresh in-memory state: {error}");
+        }
+    }
+
+    if let Err(error) = emit_complete(&completed) {
+        eprintln!("watch-data import committed but failed to emit completion event: {error}");
+    }
+
+    completed
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlaybackEnrichmentKind {
     FetchFullVideoInfo,
@@ -2405,6 +2430,40 @@ pub async fn get_watch_later_count(
 ) -> Result<usize, String> {
     state.db.get_watch_later_count().map_err(|e| e.to_string())
 }
+#[tauri::command]
+pub async fn preview_watch_data_import(
+    request: WatchDataImportPreviewRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<WatchDataImportPreviewResponse, String> {
+    state
+        .db
+        .preview_watch_data_import(&std::path::PathBuf::from(request.path))
+}
+
+#[tauri::command]
+pub async fn execute_watch_data_import(
+    app: AppHandle,
+    request: WatchDataImportExecuteRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<WatchDataImportCompleted, String> {
+    let completed = state.db.execute_watch_data_import(
+        &std::path::PathBuf::from(&request.path),
+        &request.fingerprint,
+        &request.confirmation_token,
+        &request.confirmed_summary,
+    )?;
+
+    Ok(finalize_watch_data_import_post_commit(
+        completed,
+        || state.refresh_after_watch_data_import().map_err(|e| e.to_string()),
+        |cleared_list_id| emit_active_playback_cleared(&app, cleared_list_id),
+        |completed| {
+            app.emit("watch-data-import-complete", completed)
+                .map_err(|e| e.to_string())
+        },
+    ))
+}
+
 // ===== State Management Commands =====
 
 #[tauri::command]
@@ -3770,6 +3829,80 @@ mod tests {
     }
 
     #[test]
+    fn execute_watch_data_import_does_not_propagate_post_commit_refresh_or_event_failures() {
+        let source = std::fs::read_to_string(std::path::Path::new(file!())).unwrap();
+        let start = source.find("pub async fn execute_watch_data_import(").unwrap();
+        let end = source[start..]
+            .find("// ===== State Management Commands =====")
+            .map(|i| start + i)
+            .unwrap();
+        let function_body = &source[start..end];
+
+        assert!(function_body.contains("state.db.execute_watch_data_import("));
+        assert!(function_body.contains("finalize_watch_data_import_post_commit("));
+        assert!(!function_body.contains("refresh_after_watch_data_import()\n        .map_err(|e| e.to_string())?"));
+        assert!(!function_body.contains("emit_active_playback_cleared(&app, &cleared_list_id)?"));
+        assert!(!function_body.contains("app.emit(\"watch-data-import-complete\", &completed)\n        .map_err(|e| e.to_string())?"));
+    }
+
+    #[test]
+    fn finalize_watch_data_import_post_commit_returns_completed_when_refresh_fails() {
+        let completed = sample_watch_data_import_completed();
+        let refresh_called = std::cell::Cell::new(false);
+        let cleared_called = std::cell::Cell::new(false);
+        let complete_called = std::cell::Cell::new(false);
+
+        let result = finalize_watch_data_import_post_commit(
+            completed.clone(),
+            || {
+                refresh_called.set(true);
+                Err("refresh failed".to_string())
+            },
+            |_| {
+                cleared_called.set(true);
+                Ok(())
+            },
+            |_| {
+                complete_called.set(true);
+                Ok(())
+            },
+        );
+
+        assert_eq!(result, completed);
+        assert!(refresh_called.get());
+        assert!(!cleared_called.get());
+        assert!(complete_called.get());
+    }
+
+    #[test]
+    fn finalize_watch_data_import_post_commit_keeps_success_after_event_failures() {
+        let completed = sample_watch_data_import_completed();
+        let calls = std::cell::RefCell::new(Vec::new());
+
+        let result = finalize_watch_data_import_post_commit(
+            completed.clone(),
+            || {
+                calls.borrow_mut().push("refresh");
+                Ok(Some(ListContextId::History))
+            },
+            |list_id| {
+                calls.borrow_mut().push(match list_id {
+                    ListContextId::History => "cleared-history",
+                    _ => "cleared-other",
+                });
+                Err("clear event failed".to_string())
+            },
+            |_| {
+                calls.borrow_mut().push("complete");
+                Err("complete event failed".to_string())
+            },
+        );
+
+        assert_eq!(result, completed);
+        assert_eq!(calls.into_inner(), vec!["refresh", "cleared-history", "complete"]);
+    }
+
+    #[test]
     fn build_full_video_from_snapshot_ignores_thumbinfo_shared_fields_when_snapshot_present() {
         let video = build_video_from_snapshot(
             "sm9",
@@ -3799,6 +3932,25 @@ mod tests {
         assert_eq!(video.like_count, 66);
         assert_eq!(video.uploader_name.as_deref(), Some("MikuP"));
     }
+
+    fn sample_watch_data_import_completed() -> WatchDataImportCompleted {
+        WatchDataImportCompleted {
+            file_name: "watch-data.db".to_string(),
+            history: WatchDataImportCounts {
+                imported: 6,
+                preserve: 1,
+                overwrite: 2,
+                add: 3,
+            },
+            watch_later: WatchDataImportCounts {
+                imported: 3,
+                preserve: 1,
+                overwrite: 1,
+                add: 1,
+            },
+        }
+    }
+
 
     struct TestAppState {
         state: AppState,

@@ -183,6 +183,40 @@ export interface SyncPreflightEstimate {
   free_space_kb: number | null
 }
 
+export interface WatchDataImportCounts {
+  imported: number
+  preserve: number
+  overwrite: number
+  add: number
+}
+
+export interface WatchDataImportPreviewResponse {
+  file_name: string
+  fingerprint: string
+  confirmation_token: string
+  history: WatchDataImportCounts
+  watch_later: WatchDataImportCounts
+}
+
+export interface WatchDataImportConfirmedSummary {
+  file_name: string
+  history: WatchDataImportCounts
+  watch_later: WatchDataImportCounts
+}
+
+export interface WatchDataImportExecuteRequest {
+  path: string
+  fingerprint: string
+  confirmation_token: string
+  confirmed_summary: WatchDataImportConfirmedSummary
+}
+
+export interface WatchDataImportCompleted {
+  file_name: string
+  history: WatchDataImportCounts
+  watch_later: WatchDataImportCounts
+}
+
 export interface FreshnessCheck {
   is_fresh: boolean
   local_last_update: string | null
@@ -386,6 +420,14 @@ export const api = {
 
   getSyncPreflightEstimate: async (): Promise<SyncPreflightEstimate> => {
     return invoke('get_sync_preflight_estimate')
+  },
+
+  previewWatchDataImport: async (path: string): Promise<WatchDataImportPreviewResponse> => {
+    return invoke('preview_watch_data_import', { request: { path } })
+  },
+
+  executeWatchDataImport: async (request: WatchDataImportExecuteRequest): Promise<WatchDataImportCompleted> => {
+    return invoke('execute_watch_data_import', { request })
   },
   
   // Watch Later API

@@ -284,6 +284,58 @@ pub struct WatchLaterResponse {
     pub results: Vec<WatchLaterEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportCounts {
+    pub imported: usize,
+    pub preserve: usize,
+    pub overwrite: usize,
+    pub add: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportPreviewRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportPreviewResponse {
+    pub file_name: String,
+    pub fingerprint: String,
+    pub confirmation_token: String,
+    pub history: WatchDataImportCounts,
+    pub watch_later: WatchDataImportCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportConfirmedSummary {
+    pub file_name: String,
+    pub history: WatchDataImportCounts,
+    pub watch_later: WatchDataImportCounts,
+}
+impl WatchDataImportConfirmedSummary {
+    pub fn matches_preview(&self, preview: &WatchDataImportPreviewResponse) -> bool {
+        self.file_name == preview.file_name
+            && self.history == preview.history
+            && self.watch_later == preview.watch_later
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportExecuteRequest {
+    pub path: String,
+    pub fingerprint: String,
+    pub confirmation_token: String,
+    pub confirmed_summary: WatchDataImportConfirmedSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDataImportCompleted {
+    pub file_name: String,
+    pub history: WatchDataImportCounts,
+    pub watch_later: WatchDataImportCounts,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HistoryState {
     pub page: usize,
@@ -732,6 +784,118 @@ mod tests {
         assert_eq!(json["index"], serde_json::json!(2));
         assert_eq!(json["video"]["id"], serde_json::json!("sm9"));
     }
+
+
+    #[test]
+    fn watch_data_import_preview_response_serializes_confirmation_fields() {
+        let payload = WatchDataImportPreviewResponse {
+            file_name: "transfer.db".to_string(),
+            fingerprint: "abc123".to_string(),
+            confirmation_token: "watch-data-import:abc123".to_string(),
+            history: WatchDataImportCounts {
+                imported: 2,
+                preserve: 1,
+                overwrite: 1,
+                add: 1,
+            },
+            watch_later: WatchDataImportCounts {
+                imported: 3,
+                preserve: 1,
+                overwrite: 1,
+                add: 2,
+            },
+        };
+
+        let json = serde_json::to_value(&payload).unwrap();
+
+        assert_eq!(json["file_name"], serde_json::json!("transfer.db"));
+        assert_eq!(json["fingerprint"], serde_json::json!("abc123"));
+        assert_eq!(
+            json["confirmation_token"],
+            serde_json::json!("watch-data-import:abc123")
+        );
+        assert_eq!(json["history"]["imported"], serde_json::json!(2));
+        assert_eq!(json["watch_later"]["add"], serde_json::json!(2));
+    }
+    #[test]
+    fn watch_data_import_confirmed_summary_matches_preview_response() {
+        let preview = WatchDataImportPreviewResponse {
+            file_name: "transfer.db".to_string(),
+            fingerprint: "abc123".to_string(),
+            confirmation_token: "watch-data-import:abc123".to_string(),
+            history: WatchDataImportCounts {
+                imported: 2,
+                preserve: 1,
+                overwrite: 1,
+                add: 1,
+            },
+            watch_later: WatchDataImportCounts {
+                imported: 3,
+                preserve: 1,
+                overwrite: 1,
+                add: 2,
+            },
+        };
+
+        let matching = WatchDataImportConfirmedSummary {
+            file_name: preview.file_name.clone(),
+            history: preview.history.clone(),
+            watch_later: preview.watch_later.clone(),
+        };
+        let mismatched = WatchDataImportConfirmedSummary {
+            file_name: preview.file_name.clone(),
+            history: WatchDataImportCounts {
+                add: preview.history.add + 1,
+                ..preview.history.clone()
+            },
+            watch_later: preview.watch_later.clone(),
+        };
+
+        assert!(matching.matches_preview(&preview));
+        assert!(!mismatched.matches_preview(&preview));
+    }
+
+    #[test]
+    fn watch_data_import_execute_request_serializes_confirmed_summary() {
+        let payload = WatchDataImportExecuteRequest {
+            path: "C:/imports/transfer.db".to_string(),
+            fingerprint: "abc123".to_string(),
+            confirmation_token: "watch-data-import:abc123".to_string(),
+            confirmed_summary: WatchDataImportConfirmedSummary {
+                file_name: "transfer.db".to_string(),
+                history: WatchDataImportCounts {
+                    imported: 2,
+                    preserve: 1,
+                    overwrite: 1,
+                    add: 1,
+                },
+                watch_later: WatchDataImportCounts {
+                    imported: 3,
+                    preserve: 1,
+                    overwrite: 1,
+                    add: 2,
+                },
+            },
+        };
+
+        let json = serde_json::to_value(&payload).unwrap();
+
+        assert_eq!(json["path"], serde_json::json!("C:/imports/transfer.db"));
+        assert_eq!(json["fingerprint"], serde_json::json!("abc123"));
+        assert_eq!(
+            json["confirmed_summary"]["file_name"],
+            serde_json::json!("transfer.db")
+        );
+        assert_eq!(
+            json["confirmed_summary"]["history"]["overwrite"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            json["confirmed_summary"]["watch_later"]["add"],
+            serde_json::json!(2)
+        );
+    }
+
 
     fn sample_video(id: &str) -> Video {
         Video {

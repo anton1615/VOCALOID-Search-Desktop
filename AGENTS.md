@@ -114,6 +114,7 @@ vocaloid-search-desktop/
 - `vocaloid-search-desktop/src/views/HistoryView.vue`
 - `vocaloid-search-desktop/src/views/WatchLaterView.vue`
 - `vocaloid-search-desktop/src/views/ScraperView.vue`
+  - Scraper sync 與 watch-data import UI
 
 ## 程式碼風格
 
@@ -204,6 +205,15 @@ vocaloid-search-desktop/
 - active playback identity 必須保留 list context（playlist type、playlist version、index），不能只用 `video.id` 判斷是否同一 session
 - 主視窗與 PiP 的 next/previous 必須走 Rust authoritative `play_next` / `play_previous`，不能再用目前 browsing list 的 `set_playlist_index(currentIndex +/- 1)` 代替
 - 前端播放器 session boundary 要以 authoritative playback identity 觸發；同 id 跨 list 切換時，iframe / player shell 應回到新的 pre-ready session，而不是沿用舊 media session
+
+### 11. Watch-data import / user_data merge
+
+- `ScraperView` 的 watch-data import 與 scraper sync 是兩條獨立流程；不要共用確認框或文案
+- 匯入來源接受 desktop-compatible transfer DB（`history` / `watch_later` 契約），不要分 worker / desktop 品牌來源
+- in-app import 只能 merge `history` / `watch_later`；不可直接 replace 整個 `user_data.db`，且 `config` 必須保留
+- merge key 是 `video_id`；History merge 後要依 `first_watched_at`、`watched_at`、`video_id` 重算 `first_watched_seq`
+- preview 與 execute 必須綁定同一份檔案內容；檔案內容或 confirmed summary 不一致時要拒絕執行
+- 匯入完成後要先做 Rust authoritative state refresh，再發 `watch-data-import-complete`；主視窗、PiP、已掛載 list views 都要從 Rust 真值重新同步
 
 ## OpenSpec 使用原則
 

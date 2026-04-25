@@ -334,6 +334,26 @@ let unlistenPip: (() => void) | null = null
 let unlistenVideoSelected: (() => void) | null = null
 let unlistenPlaybackVideoUpdated: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
+let unlistenWatchDataImportComplete: (() => void) | null = null
+
+async function syncSearchViewFromBackend() {
+  const playlistState = await api.getPlaylistState()
+  const searchState = await api.getSearchState()
+  const restored = resolveSearchRestoreState(playlistState, searchState)
+
+  if (!restored.shouldRunInitialSearch) {
+    results.value = restored.results
+    currentVideoIndex.value = restored.currentVideoIndex
+    currentVideo.value = restored.currentVideo
+    hasNext.value = restored.hasNext
+    totalCount.value = restored.totalCount
+    page.value = restored.page
+    pipActive.value = restored.pipActive
+  } else {
+    await search()
+  }
+}
+
 
 onMounted(async () => {
   loadSearchState()
@@ -342,22 +362,7 @@ onMounted(async () => {
 
   // Check if Rust AppState has existing state before searching
   try {
-    const playlistState = await api.getPlaylistState()
-    const searchState = await api.getSearchState()
-    
-    const restored = resolveSearchRestoreState(playlistState, searchState)
-
-    if (!restored.shouldRunInitialSearch) {
-      results.value = restored.results
-      currentVideoIndex.value = restored.currentVideoIndex
-      currentVideo.value = restored.currentVideo
-      hasNext.value = restored.hasNext
-      totalCount.value = restored.totalCount
-      page.value = restored.page
-      pipActive.value = restored.pipActive
-    } else {
-      await search()
-    }
+    await syncSearchViewFromBackend()
   } catch (e) {
     console.error('[SearchView] Failed to restore state:', e)
     // Fallback to initial search on error
@@ -434,6 +439,10 @@ onMounted(async () => {
       currentVideo.value.is_watched = is_watched
     }
   })
+
+  unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
+    await syncSearchViewFromBackend()
+  })
 })
 
 onUnmounted(() => {
@@ -443,6 +452,7 @@ onUnmounted(() => {
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
   if (unlistenVideoWatched) unlistenVideoWatched()
+  if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
 })
 
 watch([

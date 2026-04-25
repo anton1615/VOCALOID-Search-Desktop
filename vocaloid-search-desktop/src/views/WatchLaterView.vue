@@ -177,6 +177,7 @@ function setupObserver() {
 let unlistenVideoSelected: (() => void) | null = null
 let unlistenPlaybackVideoUpdated: (() => void) | null = null
 let unlistenWatchLaterChanged: (() => void) | null = null
+let unlistenWatchDataImportComplete: (() => void) | null = null
 
 onMounted(async () => {
   // Restore view state, but always reload fresh list from DB instead of trusting stale Rust playlist entries
@@ -259,6 +260,10 @@ onMounted(async () => {
   unlistenWatchLaterChanged = await listen('watch-later-changed', () => {
     loadWatchLater()
   })
+
+  unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
+    await loadWatchLater()
+  })
 })
 
 onUnmounted(() => {
@@ -266,6 +271,7 @@ onUnmounted(() => {
   if (unlistenVideoSelected) unlistenVideoSelected()
   if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
   if (unlistenWatchLaterChanged) unlistenWatchLaterChanged()
+  if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
   // Save state to Rust
   api.setWatchLaterState({
     page: page.value,

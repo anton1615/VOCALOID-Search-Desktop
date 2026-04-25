@@ -13,6 +13,7 @@ use models::WindowState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_handle = app.handle();
             
@@ -189,6 +190,8 @@ pub fn run() {
         commands::is_in_watch_later,
         commands::get_watch_later,
         commands::get_watch_later_count,
+        commands::preview_watch_data_import,
+        commands::execute_watch_data_import,
         // History/WatchLater state commands
         commands::get_history_state,
         commands::set_history_state,

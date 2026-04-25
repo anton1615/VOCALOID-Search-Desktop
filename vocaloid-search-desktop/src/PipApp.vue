@@ -117,12 +117,18 @@ let unlistenSearchResultsUpdated: (() => void) | null = null
 let unlistenResize: (() => void) | null = null
 let unlistenMove: (() => void) | null = null
 let unlistenClose: (() => void) | null = null
+let unlistenWatchDataImportComplete: (() => void) | null = null
 
 onMounted(async () => {
   await refreshActivePlayback()
 
   unlistenSearchResultsUpdated = await listen('search-results-updated', async () => {
     console.log('[PiP] Received search-results-updated event')
+    await refreshActivePlayback()
+  })
+
+  unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
+    console.log('[PiP] Received watch-data-import-complete event')
     await refreshActivePlayback()
   })
 
@@ -158,6 +164,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unlistenSearchResultsUpdated) unlistenSearchResultsUpdated()
+  if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
   if (unlistenResize) unlistenResize()
   if (unlistenMove) unlistenMove()
   if (unlistenClose) unlistenClose()

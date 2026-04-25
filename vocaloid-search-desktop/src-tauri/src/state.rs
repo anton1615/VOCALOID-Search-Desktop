@@ -5,7 +5,7 @@ use crate::models::{
 };
 use async_channel::Sender;
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -482,6 +482,91 @@ impl AppState {
             .map(|current_video| current_video.id == video.id)
             .unwrap_or(false)
     }
+
+    pub fn refresh_after_watch_data_import(
+        &self,
+    ) -> Result<Option<ListContextId>, rusqlite::Error> {
+        let watched_ids: HashSet<String> = self.db.get_all_watched_video_ids()?.into_iter().collect();
+        let history_total = self.db.get_history_count()?;
+        let watch_later_total = self.db.get_watch_later_count()?;
+
+        {
+            let mut contexts = self.list_contexts.write();
+            for (list_id, context) in contexts.iter_mut() {
+                match list_id {
+                    ListContextId::History => {
+                        context.version += 1;
+                        context.items.clear();
+                        context.page = 1;
+                        context.has_next = false;
+                        context.total_count = history_total;
+                    }
+                    ListContextId::WatchLater => {
+                        context.version += 1;
+                        context.items.clear();
+                        context.page = 1;
+                        context.has_next = false;
+                        context.total_count = watch_later_total;
+                    }
+                    _ => {
+                        for item in &mut context.items {
+                            item.is_watched = watched_ids.contains(&item.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        {
+            let mut search_state = self.search_state.write();
+            for item in &mut search_state.results {
+                item.is_watched = watched_ids.contains(&item.id);
+            }
+        }
+
+        {
+            let mut history_state = self.history_state.write();
+            history_state.page = 1;
+            history_state.has_next = false;
+            history_state.total_count = history_total;
+            history_state.version = self.get_list_context_version(&ListContextId::History);
+        }
+
+        {
+            let mut watch_later_state = self.watch_later_state.write();
+            watch_later_state.page = 1;
+            watch_later_state.has_next = false;
+            watch_later_state.total_count = watch_later_total;
+            watch_later_state.version = self.get_list_context_version(&ListContextId::WatchLater);
+        }
+
+        {
+            let mut current_video = self.current_video.write();
+            if let Some(video) = current_video.as_mut() {
+                video.is_watched = watched_ids.contains(&video.id);
+            }
+        }
+
+        self.invalidate_search_playback_snapshot();
+
+        let active_list = self
+            .active_playback
+            .read()
+            .as_ref()
+            .map(|playback| playback.list_id.clone());
+        match active_list {
+            Some(ListContextId::History) => {
+                self.clear_active_playback_for_list(&ListContextId::History);
+                Ok(Some(ListContextId::History))
+            }
+            Some(ListContextId::WatchLater) => {
+                self.clear_active_playback_for_list(&ListContextId::WatchLater);
+                Ok(Some(ListContextId::WatchLater))
+            }
+            _ => Ok(None),
+        }
+    }
+
 
     /// Set the currently visible browsing list without changing active playback.
     pub fn set_browsing_list(&self, list_id: ListContextId) {
@@ -1095,6 +1180,187 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn watch_data_import_refresh_updates_custom_list_watched_flags_without_clearing_items() {
+        let test = TestAppState::new();
+
+        let mut watched = sample_video("sm9");
+        watched.is_watched = false;
+        let mut unwatched = sample_video("sm1");
+        unwatched.is_watched = true;
+
+        test.state.update_list_context(
+            ListContextId::Custom("Favorites".to_string()),
+            vec![watched, unwatched],
+            2,
+            50,
+            true,
+            2,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+
+        let conn = test.state.db.connect_user_data().unwrap();
+        conn.execute(
+            "INSERT INTO history (video_id, title, thumbnail_url, watched_at, first_watched_seq, first_watched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            rusqlite::params!["sm9", "Imported", Option::<String>::None, "2026-04-01 00:00:00", 1, "2026-04-01 00:00:00"],
+        ).unwrap();
+        drop(conn);
+
+        let cleared = test.state.refresh_after_watch_data_import().unwrap();
+
+        assert_eq!(cleared, None);
+        let custom_context = test
+            .state
+            .get_list_context(&ListContextId::Custom("Favorites".to_string()))
+            .unwrap();
+        assert_eq!(custom_context.items.len(), 2);
+        assert_eq!(custom_context.page, 2);
+        assert!(custom_context.has_next);
+        assert!(custom_context.items[0].is_watched);
+        assert!(!custom_context.items[1].is_watched);
+    }
+
+    #[test]
+    fn watch_data_import_refresh_updates_search_truth_invalidates_mutated_lists_and_clears_history_playback() {
+        let test = TestAppState::new();
+
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![sample_video("sm1"), sample_video("sm9")],
+            1,
+            50,
+            false,
+            2,
+            "miku".to_string(),
+            None,
+            None,
+            false,
+            None,
+        );
+        {
+            let mut search_state = test.state.search_state.write();
+            search_state.results = vec![sample_video("sm1"), sample_video("sm9")];
+            search_state.page = 1;
+            search_state.page_size = 50;
+            search_state.total_count = 2;
+            search_state.version = test.state.get_list_context_version(&ListContextId::Search);
+        }
+
+        test.state.update_list_context(
+            ListContextId::History,
+            vec![sample_video("sm-history")],
+            1,
+            50,
+            false,
+            1,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+        test.state.update_list_context(
+            ListContextId::WatchLater,
+            vec![sample_video("sm-watch-later")],
+            1,
+            50,
+            false,
+            1,
+            String::new(),
+            None,
+            None,
+            false,
+            None,
+        );
+
+        let history_version_before = test.state.get_list_context_version(&ListContextId::History);
+        let watch_later_version_before = test.state.get_list_context_version(&ListContextId::WatchLater);
+        test.state.create_or_reuse_search_playback_snapshot(
+            test.state.get_list_context_version(&ListContextId::Search),
+            7,
+        );
+        test.state
+            .set_active_playback(ListContextId::History, history_version_before, 0);
+
+        let conn = test.state.db.connect_user_data().unwrap();
+        conn.execute(
+            "INSERT INTO history (video_id, title, thumbnail_url, watched_at, first_watched_seq, first_watched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            rusqlite::params!["sm9", "Imported", Option::<String>::None, "2026-04-01 00:00:00", 1, "2026-04-01 00:00:00"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO watch_later (video_id, title, thumbnail_url, added_at) VALUES (?, ?, ?, ?)",
+            rusqlite::params!["sm-watch-later", "Imported Watch Later", Option::<String>::None, "2026-04-01 00:00:00"],
+        ).unwrap();
+        drop(conn);
+
+        let cleared = test.state.refresh_after_watch_data_import().unwrap();
+
+        assert_eq!(cleared, Some(ListContextId::History));
+        assert!(test.state.active_playback.read().is_none());
+        assert!(test.state.search_playback_snapshot.read().is_none());
+        assert_eq!(test.state.get_list_context_items(&ListContextId::Search)[0].is_watched, false);
+        assert_eq!(test.state.get_list_context_items(&ListContextId::Search)[1].is_watched, true);
+        assert_eq!(test.state.search_state.read().results[0].is_watched, false);
+        assert_eq!(test.state.search_state.read().results[1].is_watched, true);
+
+        let history_context = test.state.get_list_context(&ListContextId::History).unwrap();
+        assert!(history_context.items.is_empty());
+        assert_eq!(history_context.page, 1);
+        assert!(history_context.version > history_version_before);
+
+        let watch_later_context = test.state.get_list_context(&ListContextId::WatchLater).unwrap();
+        assert!(watch_later_context.items.is_empty());
+        assert_eq!(watch_later_context.page, 1);
+        assert!(watch_later_context.version > watch_later_version_before);
+
+        assert_eq!(test.state.history_state.read().total_count, 1);
+        assert_eq!(test.state.watch_later_state.read().total_count, 1);
+    }
+
+    #[test]
+    fn watch_data_import_refresh_preserves_search_playback_binding() {
+        let test = TestAppState::new();
+
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![sample_video("sm9")],
+            1,
+            50,
+            false,
+            1,
+            "miku".to_string(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let search_version = test.state.get_list_context_version(&ListContextId::Search);
+        test.state.create_or_reuse_search_playback_snapshot(search_version, 3);
+        test.state
+            .set_active_playback(ListContextId::Search, search_version, 0);
+
+        let conn = test.state.db.connect_user_data().unwrap();
+        conn.execute(
+            "INSERT INTO history (video_id, title, thumbnail_url, watched_at, first_watched_seq, first_watched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            rusqlite::params!["sm9", "Imported", Option::<String>::None, "2026-04-01 00:00:00", 1, "2026-04-01 00:00:00"],
+        ).unwrap();
+        drop(conn);
+
+        let cleared = test.state.refresh_after_watch_data_import().unwrap();
+
+        assert_eq!(cleared, None);
+        let active = test.state.active_playback.read().clone().unwrap();
+        assert_eq!(active.list_id, ListContextId::Search);
+        assert_eq!(active.list_version, search_version);
+        assert_eq!(active.current_index, 0);
+        assert!(test.state.search_playback_snapshot.read().is_none());
+        assert!(test.state.get_list_context_items(&ListContextId::Search)[0].is_watched);
+    }
     fn sample_video(id: &str) -> Video {
         Video {
             id: id.to_string(),
