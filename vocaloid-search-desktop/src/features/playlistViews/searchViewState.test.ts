@@ -41,6 +41,13 @@ describe('searchViewState', () => {
     expect(restored.formulaWeights.view).toBe(5)
   })
 
+  test('restores missing persisted duration bounds to undefined', () => {
+    const restored = restoreSearchPersistenceState({ sortField: 'view' })
+
+    expect(restored).toHaveProperty('durationGte', undefined)
+    expect(restored).toHaveProperty('durationLte', undefined)
+  })
+
   test('builds search request with filters and formula filter only when active', () => {
     const request = buildSearchRequest({
       query: 'miku',
@@ -77,6 +84,37 @@ describe('searchViewState', () => {
         like_weight: 1,
         min_score: 100,
       },
+    })
+  })
+
+  test('builds search request with duration seconds and omits unset duration bounds', () => {
+    const requestWithBothBounds = buildSearchRequest({
+      query: '',
+      page: 1,
+      pageSize: 50,
+      state: {
+        ...baseState,
+        durationGte: 60,
+        durationLte: 360,
+      },
+    })
+
+    expect(requestWithBothBounds.filters).toEqual({
+      duration: { gte: 60, lte: 360 },
+    })
+
+    const requestWithMinOnly = buildSearchRequest({
+      query: '',
+      page: 1,
+      pageSize: 50,
+      state: {
+        ...baseState,
+        durationGte: 60,
+      },
+    })
+
+    expect(requestWithMinOnly.filters).toEqual({
+      duration: { gte: 60 },
     })
   })
 

@@ -35,6 +35,14 @@ describe('useSearchFilters', () => {
     expect(hasActiveFilters.value).toBe(true)
   })
 
+  test('hasActiveFilters is true when durationGte is set', () => {
+    const { hasActiveFilters, durationGte } = useSearchFilters()
+
+    durationGte.value = 60
+
+    expect(hasActiveFilters.value).toBe(true)
+  })
+
   test('hasActiveFilters is true when startTimeGte is set', () => {
     const { hasActiveFilters, startTimeGte } = useSearchFilters()
 
@@ -86,6 +94,18 @@ describe('useSearchFilters', () => {
     expect(hasActiveFilters.value).toBe(false)
   })
 
+  test('resetFilters clears duration bounds', () => {
+    const { durationGte, durationLte, resetFilters } = useSearchFilters()
+
+    durationGte.value = 60
+    durationLte.value = 360
+
+    resetFilters()
+
+    expect(durationGte.value).toBeUndefined()
+    expect(durationLte.value).toBeUndefined()
+  })
+
   test('getFilterState returns current filter state', () => {
     const { sortField, sortOrder, excludeWatched, viewGte, getFilterState } = useSearchFilters()
 
@@ -100,5 +120,17 @@ describe('useSearchFilters', () => {
     expect(state.sortOrder).toBe('asc')
     expect(state.excludeWatched).toBe(true)
     expect(state.viewGte).toBe(1000)
+  })
+
+  test('getFilterState returns duration bounds', () => {
+    const { durationGte, durationLte, getFilterState } = useSearchFilters()
+
+    durationGte.value = 60
+    durationLte.value = 360
+
+    const state = getFilterState()
+
+    expect(state.durationGte).toBe(60)
+    expect(state.durationLte).toBe(360)
   })
 })

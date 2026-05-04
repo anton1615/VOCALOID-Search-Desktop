@@ -34,6 +34,8 @@
     "mylists": "Mylists",
     "comments": "Comments",
     "likes": "Likes",
+    "duration": "Duration",
+    "durationHelper": "Enter seconds or m:ss (for example, 90 or 1:30).",
     "uploadDateRange": "Upload Date",
     "min": "Min",
     "max": "Max",

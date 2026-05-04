@@ -161,6 +161,7 @@ pub struct Filters {
     pub mylist: Option<NumericFilter>,
     pub comment: Option<NumericFilter>,
     pub like: Option<NumericFilter>,
+    pub duration: Option<NumericFilter>,
     pub start_time: Option<DateFilter>,
 }
 

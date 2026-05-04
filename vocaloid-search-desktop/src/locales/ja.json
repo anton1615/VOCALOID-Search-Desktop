@@ -34,6 +34,8 @@
     "mylists": "マイリスト数",
     "comments": "コメント数",
     "likes": "いいね数",
+    "duration": "再生時間",
+    "durationHelper": "秒数または m:ss 形式で入力してください（例: 90、1:30）。",
     "uploadDateRange": "投稿日",
     "min": "最小",
     "max": "最大",

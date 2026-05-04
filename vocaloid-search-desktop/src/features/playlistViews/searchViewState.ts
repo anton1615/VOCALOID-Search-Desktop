@@ -26,6 +26,8 @@ export interface SearchPersistenceState {
   commentLte?: number
   likeGte?: number
   likeLte?: number
+  durationGte?: number
+  durationLte?: number
   startTimeGte: string
   startTimeLte: string
 }
@@ -62,6 +64,8 @@ export function restoreSearchPersistenceState(saved: Partial<SearchPersistenceSt
     commentLte: saved?.commentLte,
     likeGte: saved?.likeGte,
     likeLte: saved?.likeLte,
+    durationGte: saved?.durationGte,
+    durationLte: saved?.durationLte,
     startTimeGte: saved?.startTimeGte || '',
     startTimeLte: saved?.startTimeLte || '',
   }
@@ -99,6 +103,11 @@ export function buildSearchRequest({
     filters.like = {}
     if (Number.isFinite(state.likeGte)) filters.like.gte = state.likeGte
     if (Number.isFinite(state.likeLte)) filters.like.lte = state.likeLte
+  }
+  if (Number.isFinite(state.durationGte) || Number.isFinite(state.durationLte)) {
+    filters.duration = {}
+    if (Number.isFinite(state.durationGte)) filters.duration.gte = state.durationGte
+    if (Number.isFinite(state.durationLte)) filters.duration.lte = state.durationLte
   }
   if (state.startTimeGte || state.startTimeLte) {
     filters.start_time = {}

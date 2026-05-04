@@ -24,6 +24,23 @@ describe('scraper sync flow', () => {
     expect(source).toContain('showConfirm.value = true')
   })
 
+  test('refreshes freshness status from backend when scraper polling observes completion', () => {
+    const scraperViewPath = resolve(__dirname, '../../views/ScraperView.vue')
+    const source = readFileSync(scraperViewPath, 'utf8')
+
+    expect(source).toContain('async function refreshFreshnessStatus()')
+    expect(source).toContain('await api.checkDatabaseFreshness()')
+    expect(source).toContain('await refreshFreshnessStatus()')
+  })
+
+  test('makes scraper route content scrollable so sync progress is not clipped', () => {
+    const scraperViewPath = resolve(__dirname, '../../views/ScraperView.vue')
+    const source = readFileSync(scraperViewPath, 'utf8')
+
+    expect(source).toContain('height: 100%;')
+    expect(source).toContain('overflow-y: auto;')
+  })
+
   test('renders structured storage information instead of the raw database path block', () => {
     const scraperViewPath = resolve(__dirname, '../../views/ScraperView.vue')
     const source = readFileSync(scraperViewPath, 'utf8')

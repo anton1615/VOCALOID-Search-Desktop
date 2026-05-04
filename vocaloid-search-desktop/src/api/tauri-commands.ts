@@ -74,6 +74,7 @@ export interface Filters {
   mylist?: NumericFilter
   comment?: NumericFilter
   like?: NumericFilter
+  duration?: NumericFilter
   start_time?: DateFilter
 }
 

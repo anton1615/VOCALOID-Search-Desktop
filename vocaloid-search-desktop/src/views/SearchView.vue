@@ -55,6 +55,10 @@ const commentGte = ref<number | undefined>(undefined)
 const commentLte = ref<number | undefined>(undefined)
 const likeGte = ref<number | undefined>(undefined)
 const likeLte = ref<number | undefined>(undefined)
+const durationGte = ref<number | undefined>(undefined)
+const durationLte = ref<number | undefined>(undefined)
+const durationGteInput = ref('')
+const durationLteInput = ref('')
 const startTimeGte = ref('')
 const startTimeLte = ref('')
 
@@ -63,9 +67,35 @@ const hasActiveFilters = computed(() => {
          mylistGte.value !== undefined || mylistLte.value !== undefined ||
          commentGte.value !== undefined || commentLte.value !== undefined ||
          likeGte.value !== undefined || likeLte.value !== undefined ||
+         durationGte.value !== undefined || durationLte.value !== undefined ||
          startTimeGte.value !== '' || startTimeLte.value !== '' ||
          (showFormulaFilter.value && formulaMinScore.value > 0)
 })
+
+function parseDurationInput(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed)
+  }
+
+  const timeMatch = trimmed.match(/^(\d+):([0-5]\d)$/)
+  if (timeMatch) {
+    return Number(timeMatch[1] ?? 0) * 60 + Number(timeMatch[2] ?? 0)
+  }
+
+  return undefined
+}
+
+function formatDurationFilterInput(value: number | undefined): string {
+  return value === undefined ? '' : String(value)
+}
+
+function syncDurationInputs() {
+  durationGte.value = parseDurationInput(durationGteInput.value)
+  durationLte.value = parseDurationInput(durationLteInput.value)
+}
 
 const pipActive = ref(false)
 const modalMouseDownOnBackdrop = ref(false)
@@ -89,6 +119,8 @@ function saveSearchState() {
     commentLte: commentLte.value,
     likeGte: likeGte.value,
     likeLte: likeLte.value,
+    durationGte: durationGte.value,
+    durationLte: durationLte.value,
     startTimeGte: startTimeGte.value,
     startTimeLte: startTimeLte.value,
   })
@@ -113,6 +145,10 @@ function loadSearchState() {
       commentLte.value = state.commentLte
       likeGte.value = state.likeGte
       likeLte.value = state.likeLte
+      durationGte.value = state.durationGte
+      durationLte.value = state.durationLte
+      durationGteInput.value = formatDurationFilterInput(state.durationGte)
+      durationLteInput.value = formatDurationFilterInput(state.durationLte)
       startTimeGte.value = state.startTimeGte
       startTimeLte.value = state.startTimeLte
       Object.assign(formulaWeights, state.formulaWeights)
@@ -124,6 +160,7 @@ function loadSearchState() {
 }
 
 async function search() {
+  syncDurationInputs()
   loading.value = true
   await api.setSearchLoading(true)
   page.value = 1
@@ -152,6 +189,8 @@ async function search() {
         commentLte: commentLte.value,
         likeGte: likeGte.value,
         likeLte: likeLte.value,
+        durationGte: durationGte.value,
+        durationLte: durationLte.value,
         startTimeGte: startTimeGte.value,
         startTimeLte: startTimeLte.value,
       }),
@@ -220,6 +259,10 @@ function resetFilters() {
   commentLte.value = undefined
   likeGte.value = undefined
   likeLte.value = undefined
+  durationGte.value = undefined
+  durationLte.value = undefined
+  durationGteInput.value = ''
+  durationLteInput.value = ''
   startTimeGte.value = ''
   startTimeLte.value = ''
   showFormulaFilter.value = false
@@ -228,6 +271,7 @@ function resetFilters() {
 }
 
 function applyFilters() {
+  syncDurationInputs()
   showAdvancedFilter.value = false
   search()
 }
@@ -458,7 +502,7 @@ onUnmounted(() => {
 watch([
   sortField, sortOrder, excludeWatched, showFormulaFilter, formulaMinScore,
   viewGte, viewLte, mylistGte, mylistLte, commentGte, commentLte,
-  likeGte, likeLte, startTimeGte, startTimeLte
+  likeGte, likeLte, durationGte, durationLte, startTimeGte, startTimeLte
 ], saveSearchState, { deep: true })
 
 watch(formulaWeights, () => saveSearchState(), { deep: true })
@@ -637,6 +681,15 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
               <input type="number" v-model.number="likeGte" :placeholder="t('filter.min')"> - 
               <input type="number" v-model.number="likeLte" :placeholder="t('filter.max')">
             </div>
+          </div>
+          <div class="form-group">
+            <label>{{ t('filter.duration') }}</label>
+            <div class="range-inputs">
+              <input type="text" v-model="durationGteInput" @input="syncDurationInputs" :placeholder="t('filter.min')">
+              -
+              <input type="text" v-model="durationLteInput" @input="syncDurationInputs" :placeholder="t('filter.max')">
+            </div>
+            <p class="filter-helper">{{ t('filter.durationHelper') }}</p>
           </div>
           <div class="form-group">
             <label>{{ t('filter.uploadDateRange') }}</label>
@@ -1613,6 +1666,12 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
 .range-inputs input:focus {
   border-color: var(--color-border-focus);
   outline: none;
+}
+
+.filter-helper {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .date-presets {

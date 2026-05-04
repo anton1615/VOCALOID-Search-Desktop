@@ -214,6 +214,8 @@ vocaloid-search-desktop/
 - merge key 是 `video_id`；History merge 後要依 `first_watched_at`、`watched_at`、`video_id` 重算 `first_watched_seq`
 - preview 與 execute 必須綁定同一份檔案內容；檔案內容或 confirmed summary 不一致時要拒絕執行
 - 匯入完成後要先做 Rust authoritative state refresh，再發 `watch-data-import-complete`；主視窗、PiP、已掛載 list views 都要從 Rust 真值重新同步
+- scraper sync 完成後要重新讀 Rust stats 並刷新 `check_database_freshness` 注入狀態；
+  `/scraper` 是獨立 route，內容區需保留自己的垂直捲動，避免進度區被 main layout 截掉
 
 ## OpenSpec 使用原則
 

@@ -19,6 +19,8 @@ export interface UseSearchFiltersReturn {
   commentLte: Ref<number | undefined>
   likeGte: Ref<number | undefined>
   likeLte: Ref<number | undefined>
+  durationGte: Ref<number | undefined>
+  durationLte: Ref<number | undefined>
   startTimeGte: Ref<string>
   startTimeLte: Ref<string>
   hasActiveFilters: Ref<boolean>
@@ -46,6 +48,8 @@ export function useSearchFilters(): UseSearchFiltersReturn {
   const commentLte = ref<number | undefined>(undefined)
   const likeGte = ref<number | undefined>(undefined)
   const likeLte = ref<number | undefined>(undefined)
+  const durationGte = ref<number | undefined>(undefined)
+  const durationLte = ref<number | undefined>(undefined)
   const startTimeGte = ref('')
   const startTimeLte = ref('')
 
@@ -54,6 +58,7 @@ export function useSearchFilters(): UseSearchFiltersReturn {
            mylistGte.value !== undefined || mylistLte.value !== undefined ||
            commentGte.value !== undefined || commentLte.value !== undefined ||
            likeGte.value !== undefined || likeLte.value !== undefined ||
+           durationGte.value !== undefined || durationLte.value !== undefined ||
            startTimeGte.value !== '' || startTimeLte.value !== '' ||
            (showFormulaFilter.value && formulaMinScore.value > 0)
   })
@@ -71,6 +76,8 @@ export function useSearchFilters(): UseSearchFiltersReturn {
     commentLte.value = undefined
     likeGte.value = undefined
     likeLte.value = undefined
+    durationGte.value = undefined
+    durationLte.value = undefined
     startTimeGte.value = ''
     startTimeLte.value = ''
     showFormulaFilter.value = false
@@ -95,6 +102,8 @@ export function useSearchFilters(): UseSearchFiltersReturn {
       commentLte: commentLte.value,
       likeGte: likeGte.value,
       likeLte: likeLte.value,
+      durationGte: durationGte.value,
+      durationLte: durationLte.value,
       startTimeGte: startTimeGte.value,
       startTimeLte: startTimeLte.value,
     }
@@ -117,6 +126,8 @@ export function useSearchFilters(): UseSearchFiltersReturn {
     commentLte,
     likeGte,
     likeLte,
+    durationGte,
+    durationLte,
     startTimeGte,
     startTimeLte,
     hasActiveFilters,

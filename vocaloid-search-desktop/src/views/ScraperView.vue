@@ -88,6 +88,22 @@ async function loadStats() {
   }
 }
 
+async function refreshFreshnessStatus() {
+  if (!freshnessStatus) return
+
+  try {
+    const freshness = await api.checkDatabaseFreshness()
+    freshnessStatus.value = {
+      message: freshness.message,
+      isFresh: freshness.is_fresh,
+      localLastUpdate: freshness.local_last_update ?? null,
+      apiLastUpdate: freshness.api_last_update ?? null,
+    }
+  } catch (e) {
+    console.error('Failed to refresh freshness status:', e)
+  }
+}
+
 async function saveConfig() {
   try {
     await api.saveScraperConfig(config.value)
@@ -192,19 +208,27 @@ async function confirmWatchDataImport() {
   }
 }
 
-function startPolling() {
-  progressPollInterval.value = window.setInterval(async () => {
-    try {
-      const p = await api.getScraperProgress()
-      progress.value = p
-      if (!p.is_running) {
-        stopPolling()
-        await loadStats()
-      }
-    } catch (e) {
-      console.error('Failed to get progress:', e)
+async function refreshProgress() {
+  try {
+    const p = await api.getScraperProgress()
+    progress.value = p
+    if (!p.is_running) {
+      stopPolling()
+      await loadStats()
+      await refreshFreshnessStatus()
     }
+  } catch (e) {
+    console.error('Failed to get progress:', e)
+  }
+}
+
+function startPolling() {
+  if (progressPollInterval.value) return
+
+  progressPollInterval.value = window.setInterval(() => {
+    void refreshProgress()
   }, 1000)
+  void refreshProgress()
 }
 
 function stopPolling() {
@@ -492,6 +516,9 @@ onUnmounted(() => {
   padding: 2rem;
   max-width: 800px;
   margin: 0 auto;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 h2 {

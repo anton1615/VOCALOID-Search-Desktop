@@ -934,6 +934,16 @@ fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (Strin
                 params.push(lte.to_string()); 
             }
         }
+        if let Some(ref d) = filters.duration {
+            if let Some(gte) = d.gte {
+                where_clauses.push("v.duration >= ?".to_string());
+                params.push(gte.to_string());
+            }
+            if let Some(lte) = d.lte {
+                where_clauses.push("v.duration <= ?".to_string());
+                params.push(lte.to_string());
+            }
+        }
         if let Some(ref t) = filters.start_time {
             if let Some(ref gte) = t.gte {
                 let gte_str = format!("{}T00:00:00+09:00", gte);
@@ -1044,6 +1054,10 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
         if let Some(ref l) = filters.like {
             if let Some(gte) = l.gte { where_clauses.push("v.like_count >= ?".to_string()); params.push(Box::new(gte as i64)); }
             if let Some(lte) = l.lte { where_clauses.push("v.like_count <= ?".to_string()); params.push(Box::new(lte as i64)); }
+        }
+        if let Some(ref d) = filters.duration {
+            if let Some(gte) = d.gte { where_clauses.push("v.duration >= ?".to_string()); params.push(Box::new(gte as i64)); }
+            if let Some(lte) = d.lte { where_clauses.push("v.duration <= ?".to_string()); params.push(Box::new(lte as i64)); }
         }
         if let Some(ref t) = filters.start_time {
             if let Some(ref gte) = t.gte {
@@ -1242,6 +1256,16 @@ pub async fn search(
             }
             if let Some(lte) = l.lte {
                 where_clauses.push("v.like_count <= ?".to_string());
+                params.push(Box::new(lte as i64));
+            }
+        }
+        if let Some(ref d) = filters.duration {
+            if let Some(gte) = d.gte {
+                where_clauses.push("v.duration >= ?".to_string());
+                params.push(Box::new(gte as i64));
+            }
+            if let Some(lte) = d.lte {
+                where_clauses.push("v.duration <= ?".to_string());
                 params.push(Box::new(lte as i64));
             }
         }
@@ -2668,6 +2692,28 @@ mod tests {
         
         assert!(sql.contains("v.view_count >= ?"));
         assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn build_query_with_duration_filter() {
+        let request = SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: Some(Filters {
+                duration: Some(NumericFilter { gte: Some(60.0), lte: Some(300.0) }),
+                ..Default::default()
+            }),
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+        
+        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        
+        assert!(sql.contains("v.duration >= ?"));
+        assert!(sql.contains("v.duration <= ?"));
+        assert_eq!(params, vec!["60", "300"]);
     }
 
     #[test]

@@ -34,6 +34,8 @@
     "mylists": "Mylist 數",
     "comments": "評論數",
     "likes": "喜歡數",
+    "duration": "影片長度",
+    "durationHelper": "輸入秒數或 m:ss 格式（例如 90 或 1:30）。",
     "uploadDateRange": "上傳日期",
     "min": "最少",
     "max": "最多",
