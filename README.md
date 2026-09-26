@@ -365,6 +365,7 @@ The following ideas still appear aligned with the current product direction:
 - 🐧 **Linux Support** using Tauri's cross-platform model
 - 📦 **Offline Playback** through local downloads
 - 🗂️ **Custom Playlists** beyond Watch Later
+- 🔤 **Custom Interface Fonts** for a personalized look
 
 ---
 

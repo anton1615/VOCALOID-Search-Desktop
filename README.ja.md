@@ -365,6 +365,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - 🐧 **Linux 対応** を Tauri のクロスプラットフォーム性で進める
 - 📦 **オフライン再生** のためのローカルダウンロード
 - 🗂️ **Watch Later を超えるカスタムプレイリスト**
+- 🔤 **インターフェースフォントのカスタマイズ** で好みの見た目に
 
 ---
 

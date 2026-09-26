@@ -365,6 +365,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - 🐧 利用 Tauri 跨平台能力推進 **Linux 支援**
 - 📦 提供 **離線播放** 所需的本地下載能力
 - 🗂️ 發展超越 Watch Later 的 **自訂播放清單**
+- 🔤 **自訂介面字體**，打造個人化外觀
 
 ---
 
