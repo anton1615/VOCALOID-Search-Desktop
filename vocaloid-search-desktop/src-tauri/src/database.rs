@@ -1,6 +1,6 @@
 use crate::models::{
-    WatchDataImportCompleted, WatchDataImportConfirmedSummary, WatchDataImportCounts,
-    WatchDataImportPreviewResponse,
+    normalize_title_html_entities, WatchDataImportCompleted, WatchDataImportConfirmedSummary,
+    WatchDataImportCounts, WatchDataImportPreviewResponse,
 };
 use chrono::NaiveDateTime;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -60,6 +60,10 @@ CREATE TRIGGER IF NOT EXISTS videos_au AFTER UPDATE ON videos BEGIN
     INSERT INTO video_fts(rowid, title, tags) 
     VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
 END;
+
+CREATE TABLE IF NOT EXISTS migration_markers (
+    name TEXT PRIMARY KEY
+);
 "#;
 
 /// Schema for user_data.db - contains user-generated data (history, watch_later, config)
@@ -83,6 +87,10 @@ CREATE TABLE IF NOT EXISTS watch_later (
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS migration_markers (
+    name TEXT PRIMARY KEY
 );
 "#;
 
@@ -529,17 +537,19 @@ pub fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
 
 pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), rusqlite::Error> {
     // Initialize videos.db
-    let videos_conn = Connection::open(videos_path)?;
+    let mut videos_conn = Connection::open(videos_path)?;
     videos_conn.execute_batch(VIDEOS_SCHEMA)?;
     migrate_videos_schema(&videos_conn)?;
+    migrate_title_entities(&mut videos_conn, &["videos"])?;
     videos_conn.pragma_update(None, "journal_mode", "WAL")?;
     videos_conn.pragma_update(None, "synchronous", "NORMAL")?;
     videos_conn.pragma_update(None, "cache_size", -64000)?;
 
     // Initialize user_data.db
-    let user_data_conn = Connection::open(user_data_path)?;
+    let mut user_data_conn = Connection::open(user_data_path)?;
     user_data_conn.execute_batch(USER_DATA_SCHEMA)?;
     migrate_user_data_schema(&user_data_conn)?;
+    migrate_title_entities(&mut user_data_conn, &["history", "watch_later"])?;
     user_data_conn.pragma_update(None, "journal_mode", "WAL")?;
     user_data_conn.pragma_update(None, "synchronous", "NORMAL")?;
     user_data_conn.pragma_update(None, "cache_size", -64000)?;
@@ -709,6 +719,52 @@ fn backfill_history_first_watch_metadata(conn: &Connection) -> Result<(), rusqli
         )?;
     }
 
+    tx.commit()?;
+    Ok(())
+}
+
+const TITLE_ENTITY_NORMALIZATION_MIGRATION: &str = "title-entity-normalization-v1";
+
+fn migrate_title_entities(
+    conn: &mut Connection,
+    tables: &[&str],
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let already_migrated: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM migration_markers WHERE name = ?)",
+        [TITLE_ENTITY_NORMALIZATION_MIGRATION],
+        |row| row.get::<_, i64>(0),
+    )? != 0;
+
+    if already_migrated {
+        tx.commit()?;
+        return Ok(());
+    }
+
+    for table in tables {
+        let rows: Vec<(i64, String)> = {
+            let mut stmt = tx.prepare(&format!("SELECT rowid, title FROM {table}"))?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        for (rowid, title) in rows {
+            let normalized_title = normalize_title_html_entities(&title);
+            if normalized_title.as_ref() != title {
+                tx.execute(
+                    &format!("UPDATE {table} SET title = ? WHERE rowid = ?"),
+                    params![normalized_title.as_ref(), rowid],
+                )?;
+            }
+        }
+    }
+
+    tx.execute(
+        "INSERT INTO migration_markers (name) VALUES (?)",
+        [TITLE_ENTITY_NORMALIZATION_MIGRATION],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -1496,6 +1552,102 @@ mod tests {
             rows[1],
             ("sm2".to_string(), 2, "2026-03-02 00:00:00".to_string())
         );
+    }
+
+    #[test]
+    fn init_db_normalizes_persisted_titles_once_across_cache_and_user_data() {
+        let paths = TestDbPaths::new("persisted-title-normalization");
+        let encoded_title = "Rock &amp; Roll &amp;amp; Repeat";
+        let normalized_title = "Rock & Roll &amp; Repeat";
+
+        let videos_conn = Connection::open(&paths.videos).unwrap();
+        videos_conn.execute_batch(VIDEOS_SCHEMA).unwrap();
+        videos_conn
+            .execute(
+                "INSERT INTO videos (id, title) VALUES (?, ?)",
+                params!["sm46818639", encoded_title],
+            )
+            .unwrap();
+        drop(videos_conn);
+
+        let user_data_conn = Connection::open(&paths.user_data).unwrap();
+        user_data_conn.execute_batch(USER_DATA_SCHEMA).unwrap();
+        user_data_conn
+            .execute(
+                "INSERT INTO history (video_id, title) VALUES (?, ?)",
+                params!["sm46818639", encoded_title],
+            )
+            .unwrap();
+        user_data_conn
+            .execute(
+                "INSERT INTO watch_later (video_id, title) VALUES (?, ?)",
+                params!["sm46818639", encoded_title],
+            )
+            .unwrap();
+        drop(user_data_conn);
+
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let videos_conn = Connection::open(&paths.videos).unwrap();
+        let video_title: String = videos_conn
+            .query_row(
+                "SELECT title FROM videos WHERE id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(video_title, normalized_title);
+        drop(videos_conn);
+
+        let user_data_conn = Connection::open(&paths.user_data).unwrap();
+        let history_title: String = user_data_conn
+            .query_row(
+                "SELECT title FROM history WHERE video_id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let watch_later_title: String = user_data_conn
+            .query_row(
+                "SELECT title FROM watch_later WHERE video_id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_title, normalized_title);
+        assert_eq!(watch_later_title, normalized_title);
+        drop(user_data_conn);
+
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let videos_conn = Connection::open(&paths.videos).unwrap();
+        let video_title_after_restart: String = videos_conn
+            .query_row(
+                "SELECT title FROM videos WHERE id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(video_title_after_restart, normalized_title);
+        drop(videos_conn);
+
+        let user_data_conn = Connection::open(&paths.user_data).unwrap();
+        let history_title_after_restart: String = user_data_conn
+            .query_row(
+                "SELECT title FROM history WHERE video_id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let watch_later_title_after_restart: String = user_data_conn
+            .query_row(
+                "SELECT title FROM watch_later WHERE video_id = ?",
+                ["sm46818639"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_title_after_restart, normalized_title);
+        assert_eq!(watch_later_title_after_restart, normalized_title);
     }
 
     #[test]

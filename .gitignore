@@ -15,6 +15,11 @@ docs/
 # legacy docs/plans ignore kept covered by docs/
 docs/plans/
 
+# Graphify local outputs/config
+graphify-out/
+.graphifyignore
+.graphify_*
+
 # Opencode config (local settings)
 .opencode/
 

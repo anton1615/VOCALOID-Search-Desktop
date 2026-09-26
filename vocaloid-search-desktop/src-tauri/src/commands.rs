@@ -378,7 +378,10 @@ fn extract_watch_api_metadata(payload: &serde_json::Value) -> Option<WatchApiMet
     let tag = response.get("tag");
 
     Some(WatchApiMetadata {
-        title: video.get("title").and_then(|v| v.as_str()).map(|v| v.to_string()),
+        title: video
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(|title| normalize_title_html_entities(title).into_owned()),
         registered_at: video.get("registeredAt").and_then(|v| v.as_str()).map(|v| v.to_string()),
         description: video.get("description").and_then(|v| v.as_str()).map(|v| v.to_string()),
         view_count: count.and_then(|v| v.get("view")).and_then(|v| v.as_i64()),
@@ -3685,6 +3688,26 @@ mod tests {
         assert_eq!(extracted.uploader_id.as_deref(), Some("123"));
         assert_eq!(extracted.uploader_name.as_deref(), Some("Osakihan"));
         assert_eq!(extracted.tags, vec!["音楽".to_string(), "VOCALOID".to_string()]);
+    }
+
+    #[test]
+    fn watch_api_metadata_normalizes_title_entities_once() {
+        let payload = serde_json::json!({
+            "data": {
+                "response": {
+                    "video": {
+                        "title": "Rock &amp; Roll &amp;amp; Repeat"
+                    }
+                }
+            }
+        });
+
+        let extracted = extract_watch_api_metadata(&payload).unwrap();
+
+        assert_eq!(
+            extracted.title.as_deref(),
+            Some("Rock & Roll &amp; Repeat")
+        );
     }
 
     #[test]

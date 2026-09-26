@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserInfo {
@@ -538,6 +539,7 @@ pub struct SearchPlaybackSnapshot {
 #[allow(non_snake_case)]
 pub struct SnapshotVideo {
     pub contentId: String,
+    #[serde(deserialize_with = "deserialize_html_entity_string")]
     pub title: String,
     pub thumbnailUrl: serde_json::Value,
     #[serde(default, deserialize_with = "deserialize_optional_i64_flexible")]
@@ -556,6 +558,21 @@ pub struct SnapshotVideo {
     pub description: Option<String>,
     #[serde(deserialize_with = "deserialize_user_id")]
     pub userId: Option<String>,
+}
+
+pub fn normalize_title_html_entities(title: &str) -> Cow<'_, str> {
+    if !title.contains('&') {
+        return Cow::Borrowed(title);
+    }
+
+    quick_xml::escape::unescape(title).unwrap_or(Cow::Borrowed(title))
+}
+
+fn deserialize_html_entity_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(normalize_title_html_entities(&String::deserialize(deserializer)?).into_owned())
 }
 
 fn deserialize_optional_i64_flexible<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
@@ -680,6 +697,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_title_decodes_html_entities_exactly_once() {
+        let snapshot = serde_json::from_value::<SnapshotVideo>(serde_json::json!({
+            "contentId": "sm9",
+            "title": "Rock &amp; Roll &amp;amp; Repeat",
+            "thumbnailUrl": "https://example.com/thumb.jpg",
+            "startTime": null,
+            "tags": null,
+            "genre": null,
+            "description": null,
+            "userId": null,
+        }))
+        .unwrap();
+
+        assert_eq!(snapshot.title, "Rock & Roll &amp; Repeat");
+    }
 
     #[test]
     fn sort_field_serializes_to_lowercase() {

@@ -150,17 +150,15 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
    * Handle video change from external source (e.g., video-selected event)
    */
   async function handleVideoChange(video: Video | null, index: number, hasNextVideo: boolean): Promise<void> {
-    // Clear previous message source
-    lastPlayerMessageSource = clearPlayerMessageSource(lastPlayerMessageSource)
-
     currentVideo.value = video
     currentIndex.value = index
     hasNext.value = hasNextVideo
-    playerReady.value = false
-    isPlaying.value = false
-    hasMarkedCurrent = false
 
     if (!video) {
+      lastPlayerMessageSource = clearPlayerMessageSource(lastPlayerMessageSource)
+      playerReady.value = false
+      isPlaying.value = false
+      hasMarkedCurrent = false
       metadataReady.value = false
       playbackSessionKey.value = 'empty'
       selectedPlaybackIdentity.value = null
@@ -170,7 +168,17 @@ export function usePlayerCore(options: PlayerCoreOptions): PlayerCore {
     }
 
     const displayedIdentity = resolveDisplayedPlaybackIdentity(video, index)
-    playbackSessionKey.value = buildPlaybackSessionKey(displayedIdentity, video, index)
+    const nextSessionKey = buildPlaybackSessionKey(displayedIdentity, video, index)
+    const isNewSession = nextSessionKey !== playbackSessionKey.value
+
+    if (isNewSession) {
+      lastPlayerMessageSource = clearPlayerMessageSource(lastPlayerMessageSource)
+      playerReady.value = false
+      isPlaying.value = false
+      hasMarkedCurrent = false
+    }
+
+    playbackSessionKey.value = nextSessionKey
     const selectionStillPending =
       samePlaybackIdentity(displayedIdentity, selectedPlaybackIdentity.value) &&
       !samePlaybackIdentity(displayedIdentity, resolvedPlaybackIdentity.value)

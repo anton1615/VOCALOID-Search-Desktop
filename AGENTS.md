@@ -217,6 +217,21 @@ vocaloid-search-desktop/
 - scraper sync 完成後要重新讀 Rust stats 並刷新 `check_database_freshness` 注入狀態；
   `/scraper` 是獨立 route，內容區需保留自己的垂直捲動，避免進度區被 main layout 截掉
 
+### 12. Title entity normalization
+
+- Snapshot 與 Watch API 的 title 在 Rust ingress 邊界只解碼 HTML entities 一次
+- 啟動時以有持久 migration marker 的 transaction 正規化既有 `videos.title`、
+  `history.title`、`watch_later.title`；不可每次啟動重複解碼 `&amp;amp;`
+- 標題一律以 Vue text interpolation 顯示，不用 `v-html`
+
+### 13. Embedded player readiness
+
+- iframe message listener 必須在初始 iframe render 前安裝；unmount 時移除
+- `playerReady` / `isPlaying` 屬於當前 iframe session；相同 authoritative identity
+  的重複 props/event 同步不可重設狀態
+- 只有 playback identity/session 改變或 playback 清除時才重設 readiness；跨 list
+  同 id 仍是新 session，主視窗與 PiP 共用此契約
+
 ## OpenSpec 使用原則
 
 - 本 workspace 目前包含 `openspec/`；功能新增、重大修復、重構應遵循

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, type PlaybackIdentityPayload, type PlaylistType, type Video } from '../api/tauri-commands'
 import VideoMetaPanel from './VideoMetaPanel.vue'
 import PlayerControls from './PlayerControls.vue'
 import { usePlayerCore } from '../composables/usePlayerCore'
+import { usePlayerPropSync } from '../composables/usePlayerPropSync'
 import { formatDateTime } from '../utils/dateTime'
 import { getPlayerColumnLayout } from '../features/playlistViews/playerColumnLayout'
 import { getPipLayout } from '../features/playlistViews/pipLayout'
@@ -92,29 +93,14 @@ const isPlaying = computed(() => playerCore.isPlaying.value)
 const playerReady = computed(() => playerCore.playerReady.value)
 const playbackSessionKey = computed(() => playerCore.playbackSessionKey.value)
 
-// Watch for authoritative playback identity changes from props
-watch(
-  () => [
-    props.playlistType,
-    props.playlistVersion,
-    props.currentVideoIndex,
-    props.currentVideo?.id ?? null,
-    props.hasNext,
-  ] as const,
-  async () => {
-    await playerCore.handleVideoChange(props.currentVideo, props.currentVideoIndex, props.hasNext)
-  },
-  { immediate: true },
-)
-
-// Watch for index changes
-watch(() => props.currentVideoIndex, (index) => {
-  playerCore.updateIndex(index, props.hasNext)
-})
-
-// Watch for hasNext changes
-watch(() => props.hasNext, (hasNext) => {
-  playerCore.updateHasNext(hasNext)
+// Keep player state resets limited to changes in authoritative playback identity.
+usePlayerPropSync({
+  currentVideo: computed(() => props.currentVideo),
+  currentVideoIndex: computed(() => props.currentVideoIndex),
+  hasNext: computed(() => props.hasNext),
+  playlistType: computed(() => props.playlistType),
+  playlistVersion: computed(() => props.playlistVersion),
+  player: playerCore,
 })
 
 // Handle player events from iframe
@@ -142,12 +128,14 @@ function getUserIconUrl(): string | null {
   return playerCore.getUserIconUrl()
 }
 
-// Lifecycle
+// Install synchronously during setup so an iframe inserted on the initial render
+// cannot emit loadComplete before this component begins receiving player messages.
+window.addEventListener('message', handleMessage)
+
 let eventCleanup: (() => void) | null = null
 
 onMounted(async () => {
   console.log('[UnifiedPlayer] onMounted, mode:', props.mode, 'currentVideo:', props.currentVideo?.id)
-  window.addEventListener('message', handleMessage)
   await playerCore.loadSettings()
   playerCore.updatePlaybackSettings({
     autoPlay: playerCore.autoPlay.value,

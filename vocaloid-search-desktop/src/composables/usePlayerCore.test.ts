@@ -199,6 +199,43 @@ describe('usePlayerCore playback metadata updates', () => {
     expect(player.isPlaying.value).toBe(true)
   })
 
+  test('reselecting the same playback session preserves iframe readiness and playing state', async () => {
+    const player = usePlayerCore({
+      onPlayNext: vi.fn(),
+      onMarkWatched: vi.fn(),
+      setupEvents: true,
+      getPlaybackIdentity: () => ({
+        playlistType: 'History',
+        playlistVersion: 4,
+        currentIndex: 1,
+        videoId: 'sm9',
+      }),
+    })
+    const selectedPayload = {
+      playlist_type: 'History' as const,
+      playlist_version: 4,
+      index: 1,
+      has_next: true,
+      video: makeVideo(),
+    }
+
+    await capturedEventOptions.onVideoSelected(selectedPayload)
+    player.updatePlaybackSettings({ autoPlay: false, autoSkip: false, skipThreshold: 30 })
+    player.handlePlayerMessage({ origin: 'https://embed.nicovideo.jp', data: { eventName: 'loadComplete' } } as MessageEvent)
+    player.handlePlayerMessage({
+      origin: 'https://embed.nicovideo.jp',
+      data: { eventName: 'playerStatusChange', data: { playerStatus: 2 } },
+    } as MessageEvent)
+
+    expect(player.playerReady.value).toBe(true)
+    expect(player.isPlaying.value).toBe(true)
+    await capturedEventOptions.onVideoSelected(selectedPayload)
+
+    expect(player.playbackSessionKey.value).toBe('History:4:1:sm9')
+    expect(player.playerReady.value).toBe(true)
+    expect(player.isPlaying.value).toBe(true)
+  })
+
   test('matching playback metadata updates update local video immediately before parent refresh lands', async () => {
     const player = usePlayerCore({
       onPlayNext: vi.fn(),
@@ -405,5 +442,27 @@ describe('usePlayerCore playback metadata updates', () => {
     expect(player.metadataReady.value).toBe(false)
     expect(onStateCleared).toHaveBeenCalledTimes(1)
     expect(onPlaybackStateChanged).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('usePlayerCore iframe message validation', () => {
+  test('rejects loadComplete outside the Niconico embed origin', () => {
+    const player = usePlayerCore({
+      onPlayNext: vi.fn(),
+      onMarkWatched: vi.fn(),
+      setupEvents: false,
+    })
+
+    player.handlePlayerMessage({
+      origin: 'https://untrusted.example',
+      data: { eventName: 'loadComplete', playerId: '1', sourceConnectorType: 0 },
+    } as unknown as MessageEvent)
+    expect(player.playerReady.value).toBe(false)
+
+    player.handlePlayerMessage({
+      origin: 'https://embed.nicovideo.jp',
+      data: { eventName: 'loadComplete', playerId: '1', sourceConnectorType: 0 },
+    } as unknown as MessageEvent)
+    expect(player.playerReady.value).toBe(true)
   })
 })

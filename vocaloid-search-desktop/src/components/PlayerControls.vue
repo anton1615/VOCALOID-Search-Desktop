@@ -75,7 +75,7 @@ const canPlayNext = computed(() => props.currentIndex >= 0 && (props.currentInde
         </button>
         <button
           class="icon-btn play-pause-btn"
-          :disabled="!videoId"
+          :disabled="!videoId || !playerReady"
           @click="$emit('togglePlayPause')"
         >
           {{ isPlaying ? '⏸' : '▶' }}
@@ -110,6 +110,7 @@ const canPlayNext = computed(() => props.currentIndex >= 0 && (props.currentInde
         </button>
         <button
           class="icon-btn play-pause-btn"
+          :disabled="!videoId || !playerReady"
           @click="$emit('togglePlayPause')"
         >
           {{ isPlaying ? '⏸' : '▶' }}
