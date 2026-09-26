@@ -349,6 +349,7 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 2. **地區限制影片**：可能中斷自動播放，若播放失敗也無法標記為已觀看
 3. **事件進行中的操作**：在同步或播放狀態切換等較長事件進行時切換分頁，仍可能踩到邊界情況
 4. **罕見的 PiP 同步失敗**：主視窗 / PiP 的同步已大幅改善，但少數邊界案例仍可能失敗
+5. **官方／頻道影片**：部分由官方頻道發布的影片在 Snapshot 中沒有 `userId`，watch metadata 中也沒有 `owner`。目前 app 不會使用頻道資料顯示上傳者，因此可能無法顯示上傳者名稱與頭像。
 
 ---
 

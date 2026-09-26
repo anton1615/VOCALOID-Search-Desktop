@@ -349,6 +349,7 @@ These are the noteworthy issues that still appear relevant to the current app be
 2. **Region-Locked Videos**: They can interrupt auto-play and cannot be marked as watched if playback fails entirely
 3. **Active Event Timing**: Switching tabs while a long-running event is in progress (for example sync or playback transitions) can still expose edge cases
 4. **Rare PiP Sync Failure**: PiP and main window synchronization is much more stable now, but rare sync failures are still noted as edge cases
+5. **Official / Channel Videos**: Some videos published by official channels have no `userId` in Snapshot and no `owner` in watch metadata. The app currently does not use channel metadata for uploader display, so the uploader name and avatar may be missing.
 
 ---
 
