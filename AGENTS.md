@@ -196,7 +196,9 @@ vocaloid-search-desktop/
 
 - Search 播放時，shared fields 以 `videos.db` 為主，只額外補 `description`
   與 `uploader_name`
-- History / Watch Later 播放時，共用 metadata 由 watch JSON 提供
+- History / Watch Later 播放時，共用 metadata 由 watch JSON 提供；成功 enrichment
+  必須從 `video_id` 衍生 canonical `watch_url`，供共享 `VideoMetaPanel` 顯示網址複製列
+- enrichment 失敗時保留 placeholder；不可為缺少的 metadata 偽造 `watch_url`
 - upload date 不可 fallback 成 watched / added timestamp
 
 ### 10. Cross-list same-id playback session boundary
