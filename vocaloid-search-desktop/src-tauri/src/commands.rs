@@ -420,7 +420,7 @@ fn apply_single_video_metadata(list_id: ListContextId, placeholder: Video, metad
         },
         _ => Video {
             title: metadata.title.unwrap_or(placeholder.title),
-            watch_url: placeholder.watch_url,
+            watch_url: Some(derived_watch_url(&placeholder.id)),
             thumbnail_url: placeholder.thumbnail_url,
             view_count: metadata.view_count.unwrap_or(placeholder.view_count),
             comment_count: metadata.comment_count.unwrap_or(placeholder.comment_count),
@@ -3790,6 +3790,25 @@ mod tests {
         assert_eq!(enriched.description.as_deref(), Some("watch desc"));
         assert_eq!(enriched.uploader_id.as_deref(), Some("555"));
         assert_eq!(enriched.uploader_name.as_deref(), Some("N0name"));
+    }
+
+    #[test]
+    fn non_search_single_video_metadata_derives_canonical_watch_url() {
+        for list_id in [ListContextId::History, ListContextId::WatchLater] {
+            let enriched = apply_single_video_metadata(
+                list_id,
+                Video {
+                    watch_url: None,
+                    ..sample_video("sm9")
+                },
+                WatchApiMetadata::default(),
+            );
+
+            assert_eq!(
+                enriched.watch_url.as_deref(),
+                Some("https://www.nicovideo.jp/watch/sm9")
+            );
+        }
     }
 
     #[test]
