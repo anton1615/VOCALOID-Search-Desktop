@@ -50,6 +50,11 @@ const importError = ref('')
 const importPreviewLoading = ref(false)
 const importExecuteLoading = ref(false)
 
+const syncErrorMessage = computed(() => {
+  const status = progress.value.status
+  return status.startsWith('error:') ? status.slice('error:'.length).trim() : ''
+})
+
 const isStorageInsufficient = computed(() => {
   const estimated = preflightEstimate.value?.estimated_database_size_kb
   const free = preflightEstimate.value?.free_space_kb
@@ -413,6 +418,10 @@ onUnmounted(() => {
 
     <div v-if="progress.is_running || progress.status !== 'idle'" class="progress-card">
       <h3>{{ t('scraper.syncProgress') }}</h3>
+      <div v-if="syncErrorMessage" class="alert alert-warning sync-error-alert">
+        <div class="status-title">{{ t('scraper.syncFailedTitle') }}</div>
+        <div class="status-message">{{ syncErrorMessage }}</div>
+      </div>
       <div class="progress-info">
         <span class="status">{{ progress.status }}</span>
         <span class="count">

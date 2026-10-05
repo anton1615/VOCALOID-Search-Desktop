@@ -49,7 +49,8 @@
     "recent7days": "最近7日",
     "recent30days": "最近30日",
     "recent1year": "最近1年",
-    "formulaPreview": "評分 = {view}×播放 + {mylist}×清單 + {comment}×留言 + {like}×喜歡"
+    "formulaPreview": "評分 = {view}×播放 + {mylist}×清單 + {comment}×留言 + {like}×喜歡",
+    "searchHint": "用空白 = AND，OR = 或，-詞 = 排除，\"詞 詞\" = 片語"
   },
   "player": {
     "selectVideo": "從清單中選擇影片播放",
@@ -88,6 +89,7 @@
     "cancel": "取消",
     "syncProgress": "同步進度",
     "videosFetched": "部影片",
+    "syncFailedTitle": "同步失敗",
     "confirmClear": "這將清除現有資料並重新取得。可能需要數小時。確定要繼續嗎？",
     "storageTitle": "儲存位置",
     "dataDirectory": "資料目錄",

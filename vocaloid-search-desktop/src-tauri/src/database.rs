@@ -36,31 +36,6 @@ CREATE INDEX IF NOT EXISTS idx_comment_count ON videos(comment_count);
 CREATE INDEX IF NOT EXISTS idx_like_count ON videos(like_count);
 CREATE INDEX IF NOT EXISTS idx_start_time ON videos(start_time);
 
-CREATE VIRTUAL TABLE IF NOT EXISTS video_fts USING fts5(
-    title,
-    tags,
-    content='videos',
-    content_rowid='rowid',
-    tokenize='unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS videos_ai AFTER INSERT ON videos BEGIN
-    INSERT INTO video_fts(rowid, title, tags) 
-    VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS videos_ad AFTER DELETE ON videos BEGIN
-    INSERT INTO video_fts(video_fts, rowid, title, tags) 
-    VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS videos_au AFTER UPDATE ON videos BEGIN
-    INSERT INTO video_fts(video_fts, rowid, title, tags) 
-    VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
-    INSERT INTO video_fts(rowid, title, tags) 
-    VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
-END;
-
 CREATE TABLE IF NOT EXISTS migration_markers (
     name TEXT PRIMARY KEY
 );
@@ -538,6 +513,7 @@ pub fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
 pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), rusqlite::Error> {
     // Initialize videos.db
     let mut videos_conn = Connection::open(videos_path)?;
+    ensure_cache_auto_vacuum(&videos_conn, videos_path)?;
     videos_conn.execute_batch(VIDEOS_SCHEMA)?;
     migrate_videos_schema(&videos_conn)?;
     migrate_title_entities(&mut videos_conn, &["videos"])?;
@@ -557,7 +533,57 @@ pub fn init_db(videos_path: &PathBuf, user_data_path: &PathBuf) -> Result<(), ru
     Ok(())
 }
 
+/// Keeps the rebuildable video cache at its real size: with `auto_vacuum=FULL`
+/// SQLite truncates the file as soon as a refresh frees trailing pages, so a
+/// smaller sync range no longer leaves the file at the old high-water mark.
+///
+/// Switching modes rewrites an existing database once. That rewrite needs room
+/// for the compacted copy, so it is skipped (and retried on a later launch)
+/// when free space is tight.
+fn ensure_cache_auto_vacuum(conn: &Connection, db_path: &Path) -> Result<(), rusqlite::Error> {
+    let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
+    if mode == 1 {
+        return Ok(());
+    }
+
+    conn.execute_batch("PRAGMA auto_vacuum = FULL;")?;
+
+    let page_count: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+    if page_count == 0 {
+        // Brand new database: the pragma already applies to everything created next.
+        return Ok(());
+    }
+
+    let db_kb = fs::metadata(db_path)
+        .map(|meta| meta.len() / 1024)
+        .unwrap_or(0);
+    let free_kb = fs2::available_space(db_path)
+        .map(|bytes| bytes / 1024)
+        .unwrap_or(0);
+    // The temporary copy holds the compacted database, so it is never larger
+    // than the current file; keep a fifth of headroom for the WAL.
+    if free_kb < db_kb + db_kb / 5 {
+        return Ok(());
+    }
+
+    conn.execute_batch("VACUUM;")
+}
+
+/// The unused FTS5 index (and its triggers) was removed; drop it from existing databases.
+fn drop_legacy_video_fts(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        r#"
+        DROP TRIGGER IF EXISTS videos_ai;
+        DROP TRIGGER IF EXISTS videos_ad;
+        DROP TRIGGER IF EXISTS videos_au;
+        DROP TABLE IF EXISTS video_fts;
+        "#,
+    )
+}
+
 fn migrate_videos_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    drop_legacy_video_fts(conn)?;
+
     let mut stmt = conn.prepare("PRAGMA table_info(videos)")?;
     let existing_columns: Vec<String> = stmt
         .query_map([], |row| row.get(1))?
@@ -623,30 +649,6 @@ fn migrate_videos_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_comment_count ON videos(comment_count);
         CREATE INDEX IF NOT EXISTS idx_like_count ON videos(like_count);
         CREATE INDEX IF NOT EXISTS idx_start_time ON videos(start_time);
-        DROP TABLE IF EXISTS video_fts;
-        CREATE VIRTUAL TABLE video_fts USING fts5(
-            title,
-            tags,
-            content='videos',
-            content_rowid='rowid',
-            tokenize='unicode61'
-        );
-        CREATE TRIGGER IF NOT EXISTS videos_ai AFTER INSERT ON videos BEGIN
-            INSERT INTO video_fts(rowid, title, tags)
-            VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
-        END;
-        CREATE TRIGGER IF NOT EXISTS videos_ad AFTER DELETE ON videos BEGIN
-            INSERT INTO video_fts(video_fts, rowid, title, tags)
-            VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
-        END;
-        CREATE TRIGGER IF NOT EXISTS videos_au AFTER UPDATE ON videos BEGIN
-            INSERT INTO video_fts(video_fts, rowid, title, tags)
-            VALUES('delete', old.rowid, old.title, COALESCE(old.tags, ''));
-            INSERT INTO video_fts(rowid, title, tags)
-            VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
-        END;
-        INSERT INTO video_fts(rowid, title, tags)
-        SELECT rowid, title, COALESCE(tags, '') FROM videos;
         COMMIT;
         "#,
     )?;
@@ -955,6 +957,23 @@ impl Database {
         Ok(count as usize)
     }
 
+    /// Bytes per live row excluding free pages, used to project the size of a
+    /// synced database without inheriting the current file's high-water mark.
+    pub fn live_bytes_per_row(&self) -> Result<Option<f64>, rusqlite::Error> {
+        let conn = self.connect()?;
+        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        let page_count: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+        let freelist_count: i64 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        let rows: i64 = conn.query_row("SELECT COUNT(*) FROM videos", [], |row| row.get(0))?;
+
+        if rows <= 0 {
+            return Ok(None);
+        }
+
+        let live_bytes = (page_count - freelist_count).max(0) as f64 * page_size as f64;
+        Ok(Some(live_bytes / rows as f64))
+    }
+
     pub fn get_last_update(&self) -> Result<Option<String>, rusqlite::Error> {
         let conn = self.connect()?;
         let result: Option<String> = conn
@@ -1091,11 +1110,33 @@ impl Database {
         Ok(())
     }
 
+    /// `WHERE` clause plus params for a title-only text filter over a user_data table.
+    fn title_filter(search_query: Option<&str>) -> (String, Vec<String>) {
+        let Some(query) = search_query.filter(|query| !query.trim().is_empty()) else {
+            return (String::new(), Vec::new());
+        };
+
+        let text = crate::search_query::render_like(query, &["title"]);
+        if text.sql.is_empty() {
+            (String::new(), Vec::new())
+        } else {
+            (format!(" WHERE {}", text.sql), text.params)
+        }
+    }
+
+    fn sql_params(values: Vec<String>) -> Vec<Box<dyn rusqlite::ToSql>> {
+        values
+            .into_iter()
+            .map(|value| Box::new(value) as Box<dyn rusqlite::ToSql>)
+            .collect()
+    }
+
     pub fn get_history(
         &self,
         page: usize,
         page_size: usize,
         sort_direction: Option<&str>,
+        search_query: Option<&str>,
     ) -> Result<Vec<crate::models::HistoryEntry>, rusqlite::Error> {
         let conn = self.connect_user_data()?;
         let videos_conn = self.connect_videos()?;
@@ -1105,15 +1146,21 @@ impl Database {
             Some("asc") => "ASC",
             _ => "DESC",
         };
+        let (filter, filter_params) = Self::title_filter(search_query);
         let sql = format!(
-            "SELECT video_id, title, thumbnail_url, watched_at FROM history ORDER BY watched_at {} LIMIT ? OFFSET ?",
-            order
+            "SELECT video_id, title, thumbnail_url, watched_at FROM history{} ORDER BY watched_at {} LIMIT ? OFFSET ?",
+            filter, order
         );
 
         let mut stmt = conn.prepare(&sql)?;
 
+        let mut params = Self::sql_params(filter_params);
+        params.push(Box::new(page_size as i64));
+        params.push(Box::new(offset as i64));
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|param| param.as_ref()).collect();
+
         let entries: Vec<crate::models::HistoryEntry> = stmt
-            .query_map([page_size as i64, offset as i64], |row| {
+            .query_map(&params_refs[..], |row| {
                 let video_id: String = row.get(0)?;
                 let stored_title: String = row.get(1)?;
                 let stored_thumbnail: Option<String> = row.get(2)?;
@@ -1152,9 +1199,13 @@ impl Database {
         Ok(entries)
     }
 
-    pub fn get_history_count(&self) -> Result<usize, rusqlite::Error> {
+    pub fn get_history_count(&self, search_query: Option<&str>) -> Result<usize, rusqlite::Error> {
         let conn = self.connect_user_data()?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))?;
+        let (filter, filter_params) = Self::title_filter(search_query);
+        let sql = format!("SELECT COUNT(*) FROM history{}", filter);
+        let params = Self::sql_params(filter_params);
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|param| param.as_ref()).collect();
+        let count: i64 = conn.query_row(&sql, &params_refs[..], |row| row.get(0))?;
         Ok(count as usize)
     }
 
@@ -1299,6 +1350,7 @@ impl Database {
         page: usize,
         page_size: usize,
         sort_direction: Option<&str>,
+        search_query: Option<&str>,
     ) -> Result<Vec<crate::models::WatchLaterEntry>, rusqlite::Error> {
         let conn = self.connect_user_data()?;
         let videos_conn = self.connect_videos()?;
@@ -1308,15 +1360,21 @@ impl Database {
             Some("asc") => "ASC",
             _ => "DESC",
         };
+        let (filter, filter_params) = Self::title_filter(search_query);
         let sql = format!(
-            "SELECT video_id, title, thumbnail_url, added_at FROM watch_later ORDER BY added_at {} LIMIT ? OFFSET ?",
-            order
+            "SELECT video_id, title, thumbnail_url, added_at FROM watch_later{} ORDER BY added_at {} LIMIT ? OFFSET ?",
+            filter, order
         );
 
         let mut stmt = conn.prepare(&sql)?;
 
+        let mut params = Self::sql_params(filter_params);
+        params.push(Box::new(page_size as i64));
+        params.push(Box::new(offset as i64));
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|param| param.as_ref()).collect();
+
         let entries: Vec<crate::models::WatchLaterEntry> = stmt
-            .query_map([page_size as i64, offset as i64], |row| {
+            .query_map(&params_refs[..], |row| {
                 let video_id: String = row.get(0)?;
                 let stored_title: String = row.get(1)?;
                 let stored_thumbnail: Option<String> = row.get(2)?;
@@ -1355,10 +1413,13 @@ impl Database {
         Ok(entries)
     }
 
-    pub fn get_watch_later_count(&self) -> Result<usize, rusqlite::Error> {
+    pub fn get_watch_later_count(&self, search_query: Option<&str>) -> Result<usize, rusqlite::Error> {
         let conn = self.connect_user_data()?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM watch_later", [], |row| row.get(0))?;
+        let (filter, filter_params) = Self::title_filter(search_query);
+        let sql = format!("SELECT COUNT(*) FROM watch_later{}", filter);
+        let params = Self::sql_params(filter_params);
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|param| param.as_ref()).collect();
+        let count: i64 = conn.query_row(&sql, &params_refs[..], |row| row.get(0))?;
         Ok(count as usize)
     }
 }
@@ -1803,6 +1864,82 @@ mod tests {
     }
 
     #[test]
+    fn init_db_drops_the_legacy_unused_fts_index() {
+        let paths = TestDbPaths::new("legacy-fts-drop");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        // Simulate a database created by an older build that still maintained the FTS index.
+        let conn = Connection::open(&paths.videos).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE VIRTUAL TABLE video_fts USING fts5(title, tags, content='videos', content_rowid='rowid');
+            CREATE TRIGGER videos_ai AFTER INSERT ON videos BEGIN
+                INSERT INTO video_fts(rowid, title, tags) VALUES (new.rowid, new.title, COALESCE(new.tags, ''));
+            END;
+            "#,
+        )
+        .unwrap();
+        drop(conn);
+
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.videos).unwrap();
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE name LIKE 'video_fts%' OR name IN ('videos_ai', 'videos_ad', 'videos_au')",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|row| row.ok())
+            .collect();
+
+        assert!(remaining.is_empty(), "legacy FTS objects remain: {:?}", remaining);
+    }
+
+    #[test]
+    fn init_db_enables_full_auto_vacuum_so_the_cache_shrinks_after_a_bulk_delete() {
+        let paths = TestDbPaths::new("cache-auto-vacuum");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+
+        let conn = Connection::open(&paths.videos).unwrap();
+        let mode: i64 = conn
+            .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, 1, "videos.db should use auto_vacuum=FULL");
+
+        conn.execute_batch("BEGIN").unwrap();
+        {
+            let mut stmt = conn
+                .prepare("INSERT INTO videos (id, title, tags) VALUES (?, ?, ?)")
+                .unwrap();
+            for index in 0..5_000 {
+                stmt.execute(params![
+                    format!("sm{}", index),
+                    format!("title-{}-{}", index, "x".repeat(60)),
+                    "tag tag tag vocaloid"
+                ])
+                .unwrap();
+            }
+        }
+        conn.execute_batch("COMMIT;").unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        let full_size = fs::metadata(&paths.videos).unwrap().len();
+
+        conn.execute_batch("DELETE FROM videos;").unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        let empty_size = fs::metadata(&paths.videos).unwrap().len();
+
+        assert!(
+            empty_size * 2 < full_size,
+            "auto_vacuum=FULL should truncate the cache file: {} -> {}",
+            full_size,
+            empty_size
+        );
+    }
+
+    #[test]
     fn history_entries_stay_self_contained_when_video_cache_row_is_missing() {
         let paths = TestDbPaths::new("history-self-contained");
         init_db(&paths.videos, &paths.user_data).unwrap();
@@ -1823,7 +1960,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let entries = db.get_history(1, 50, None).unwrap();
+        let entries = db.get_history(1, 50, None, None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Stored History Title");
@@ -1852,7 +1989,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let entries = db.get_watch_later(1, 50, None).unwrap();
+        let entries = db.get_watch_later(1, 50, None, None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Stored Watch Later Title");
@@ -1860,6 +1997,54 @@ mod tests {
             entries[0].thumbnail_url.as_deref(),
             Some("https://watch-later-thumb")
         );
+    }
+
+    #[test]
+    fn history_and_watch_later_search_share_the_snapshot_syntax() {
+        let paths = TestDbPaths::new("list-text-search");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+        let db = paths.database();
+
+        let conn = db.connect_user_data().unwrap();
+        for (id, title, watched_at) in [
+            ("sm1", "初音ミクの消失", "2026-03-01 00:00:00"),
+            ("sm2", "ミク ボーカル", "2026-03-02 00:00:00"),
+            ("sm3", "千本桜", "2026-03-03 00:00:00"),
+        ] {
+            conn.execute(
+                "INSERT INTO history (video_id, title, thumbnail_url, watched_at, first_watched_seq, first_watched_at) VALUES (?, ?, ?, ?, ?, ?)",
+                params![id, title, Option::<String>::None, watched_at, 1, watched_at],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO watch_later (video_id, title, thumbnail_url, added_at) VALUES (?, ?, ?, ?)",
+            params!["sm9", "初音ミクの消失", Option::<String>::None, "2026-03-01 00:00:00"],
+        )
+        .unwrap();
+        drop(conn);
+
+        // An only-excluded query mirrors the snapshot API: it matches nothing.
+        assert_eq!(db.get_history_count(Some("-ミク")).unwrap(), 0);
+        assert!(db.get_history(1, 50, None, Some("-ミク")).unwrap().is_empty());
+
+        // Positive term plus exclusion: ミク AND NOT ボーカル.
+        let filtered = db.get_history(1, 50, None, Some("ミク -ボーカル")).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].video_id, "sm1");
+        assert_eq!(db.get_history_count(Some("ミク -ボーカル")).unwrap(), 1);
+
+        // OR groups bind before AND, and filter params stay ahead of LIMIT/OFFSET.
+        let or_match = db.get_history(1, 50, None, Some("千本桜 OR ボーカル")).unwrap();
+        assert_eq!(or_match.len(), 2);
+
+        // Watch Later uses the same syntax.
+        assert_eq!(db.get_watch_later_count(Some("初音ミク")).unwrap(), 1);
+        assert!(db
+            .get_watch_later(1, 50, None, Some("ミク -初音"))
+            .unwrap()
+            .is_empty());
+        assert_eq!(db.get_watch_later_count(None).unwrap(), 1);
     }
 
     #[test]
@@ -2292,8 +2477,8 @@ mod tests {
         ).unwrap_err();
 
         assert!(error.contains("changed"));
-        assert_eq!(db.get_history_count().unwrap(), 0);
-        assert_eq!(db.get_watch_later_count().unwrap(), 0);
+        assert_eq!(db.get_history_count(None).unwrap(), 0);
+        assert_eq!(db.get_watch_later_count(None).unwrap(), 0);
     }
 
     #[test]
@@ -2387,8 +2572,8 @@ mod tests {
 
         assert!(error.contains("preview"));
         assert!(error.contains("fresh"));
-        assert_eq!(db.get_history_count().unwrap(), 3);
-        assert_eq!(db.get_watch_later_count().unwrap(), 3);
+        assert_eq!(db.get_history_count(None).unwrap(), 3);
+        assert_eq!(db.get_watch_later_count(None).unwrap(), 3);
     }
 
     #[test]
@@ -2477,8 +2662,8 @@ mod tests {
         assert_eq!(completed.file_name, fresh_preview.file_name);
         assert_eq!(completed.history, fresh_preview.history);
         assert_eq!(completed.watch_later, fresh_preview.watch_later);
-        assert_eq!(db.get_history_count().unwrap(), 3);
-        assert_eq!(db.get_watch_later_count().unwrap(), 2);
+        assert_eq!(db.get_history_count(None).unwrap(), 3);
+        assert_eq!(db.get_watch_later_count(None).unwrap(), 2);
     }
 
 

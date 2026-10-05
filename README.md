@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows native • Tauri + Rust backend • Vue 3 frontend • SQLite FTS5 search</strong>
+  <strong>Windows native • Tauri + Rust backend • Vue 3 frontend • SQLite metadata cache</strong>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <a href="https://tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB"></a>
   <a href="https://vuejs.org/"><img alt="Vue" src="https://img.shields.io/badge/Vue-3-42B883"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-backend-000000"></a>
-  <a href="https://www.sqlite.org/fts5.html"><img alt="Database" src="https://img.shields.io/badge/SQLite-FTS5-003B57"></a>
+  <a href="https://www.sqlite.org"><img alt="Database" src="https://img.shields.io/badge/SQLite-003B57"></a>
 </p>
 
 <p align="center">
@@ -75,7 +75,7 @@ VOCALOID Search Desktop is designed for people who want a **native local app** i
 
 - 🎧 **Spotify-like playback workflow** with an embedded Niconico player
 - 🖥️ **Native PiP window** that stays on top and shares the same playback state as the main window
-- 🔎 **Fast local search** powered by SQLite FTS5
+- 🔎 **Fast local search** over the local SQLite metadata cache
 - 📚 **Watch history + Watch Later** built into the desktop app
 - 🧠 **Custom formula sorting and filtering** for ranking videos your way
 - 💾 **Local-first storage** so browsing and search stay fast after sync
@@ -103,7 +103,7 @@ VOCALOID Search Desktop is designed for people who want a **native local app** i
 - 🧮 **Custom Formula Sorting & Filtering**: Weight views, likes, mylists, and comments using your own formula
 - ⏭️ **Auto-Skip**: Automatically skip video endings when desired
 - ▶️ **Embedded Player**: Continuous playback with the official Niconico embed player
-- 🏷️ **Keyword + Tag Search**: Full-text keyword search with tag filtering
+- 🏷️ **Keyword + Tag Search**: substring search over titles and tags, with -term exclusion, OR, and "quoted phrases"
 - ♾️ **Infinite Scroll**: Dynamic loading instead of fixed pagination
 - 🧪 **Shared Player Logic**: Main window and PiP consume the same playback event flow
 
@@ -166,7 +166,7 @@ The player renders first, then richer metadata lands through authoritative backe
 |-------|------------|
 | **Frontend** | TypeScript, Vue 3, Vite, Tailwind CSS |
 | **Backend** | Rust (Tauri 2.x) |
-| **Database** | SQLite with FTS5 full-text search |
+| **Database** | SQLite metadata cache |
 | **Data Sources** | [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html) for sync/search cache, `watch/{id}?responseType=json` for single-video playback metadata enrichment |
 
 ### Implementation Architecture
@@ -183,14 +183,14 @@ The player renders first, then richer metadata lands through authoritative backe
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
-│     Local SQLite Database (FTS5)        │
+│     Local SQLite Database               │
 └─────────────────────────────────────────┘
 ```
 
 ### Key Technical Details
 
 - 🔐 **Custom Protocol**: Uses `tauri://localhost` instead of HTTP localhost because Niconico's embed player rejects localhost origins
-- 🔎 **FTS5 Full-text Search**: Fast keyword and tag search with SQLite FTS5
+- 🔎 **Local Substring Search**: Fast keyword and tag search over cached titles and tags in SQLite
 - 🧮 **Formula-based Scoring**: Flexible weighting for views, likes, mylists, and comments
 - 🔄 **Versioned List Contexts**: Search / History / Watch Later each maintain stable context identity
 - 🪄 **Unified Player Core**: Shared playback state and event handling across main window and PiP
@@ -366,6 +366,9 @@ The following ideas still appear aligned with the current product direction:
 - 📦 **Offline Playback** through local downloads
 - 🗂️ **Custom Playlists** beyond Watch Later
 - 🔤 **Custom Interface Fonts** for a personalized look
+- 🪟 **System Tray** to keep the app running in the background when minimized
+- 🔄 **Scheduled Database Synchronization**
+- 🛠️ **Fix the delayed application of the Exclude Watched filter when returning to Search after a database sync**
 
 ---
 

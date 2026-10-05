@@ -4,6 +4,7 @@ pub mod models;
 pub mod playback_settings_config;
 pub mod scraper;
 pub mod scraper_preflight;
+pub mod search_query;
 pub mod state;
 
 use tauri::Manager;

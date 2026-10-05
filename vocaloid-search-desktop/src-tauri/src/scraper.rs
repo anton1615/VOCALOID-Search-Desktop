@@ -13,6 +13,19 @@ impl std::fmt::Display for CancelledError {
 
 impl std::error::Error for CancelledError {}
 
+#[derive(Debug)]
+pub struct SnapshotRequestError {
+    message: String,
+}
+
+impl std::fmt::Display for SnapshotRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for SnapshotRequestError {}
+
 const SNAPSHOT_API: &str = "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search";
 const MAX_OFFSET: usize = 100000;
 
@@ -142,8 +155,10 @@ impl Scraper {
                     .await
                 {
                     Ok(r) => r,
-                    Err(_e) => {
-                        break;
+                    Err(e) => {
+                        return Err(Box::new(SnapshotRequestError {
+                            message: format!("snapshot API request failed: {}", e),
+                        }));
                     }
                 };
                 
@@ -153,13 +168,17 @@ impl Scraper {
                     if status == 400 && offset >= MAX_OFFSET - 100 {
                         break;
                     }
-                    break;
+                    return Err(Box::new(SnapshotRequestError {
+                        message: format!("snapshot API returned HTTP {}", status),
+                    }));
                 }
                 
                 let data: serde_json::Value = match response.json().await {
                     Ok(d) => d,
-                    Err(_e) => {
-                        break;
+                    Err(e) => {
+                        return Err(Box::new(SnapshotRequestError {
+                            message: format!("snapshot API response parse failed: {}", e),
+                        }));
                     }
                 };
                 

@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::path::Path;
 
-const FALLBACK_KB_PER_VIDEO: u64 = 42;
+const FALLBACK_BYTES_PER_VIDEO: f64 = 1024.0;
 const SNAPSHOT_API: &str = "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search";
 const CATEGORY_TO_GENRE: &[(&str, &str)] = &[
     ("MUSIC", "音楽・サウンド"),
@@ -28,25 +28,22 @@ const CATEGORY_TO_GENRE: &[(&str, &str)] = &[
 
 pub fn estimate_database_size_kb(
     estimated_video_count: Option<usize>,
-    current_database_size_kb: Option<u64>,
-    current_total_videos: usize,
+    current_file_size_kb: Option<u64>,
+    live_bytes_per_row: Option<f64>,
 ) -> Option<u64> {
     let count = estimated_video_count? as u64;
-    if count == 0 {
-        return Some(0);
-    }
 
-    let kb_per_video = if let (Some(size_kb), total) = (current_database_size_kb, current_total_videos) {
-        if total > 0 {
-            size_kb.div_ceil(total as u64).max(1)
-        } else {
-            FALLBACK_KB_PER_VIDEO
-        }
-    } else {
-        FALLBACK_KB_PER_VIDEO
-    };
+    let bytes_per_row = live_bytes_per_row.unwrap_or(FALLBACK_BYTES_PER_VIDEO);
+    let required_kb = (count as f64 * bytes_per_row / 1024.0).ceil() as u64;
 
-    Some(count * kb_per_video)
+    // SQLite never shrinks a database file in place: auto_vacuum is off and the
+    // sync replaces rows with DELETE + INSERT, which recycles freed pages but
+    // keeps the file at its high-water mark. The synced file therefore cannot be
+    // smaller than what is already on disk.
+    Some(match current_file_size_kb {
+        Some(current) => required_kb.max(current),
+        None => required_kb,
+    })
 }
 
 fn build_estimate_query_params(config: &ScraperConfig) -> Vec<(String, String)> {
@@ -119,22 +116,29 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn uses_local_database_average_when_available() {
-        let estimated = estimate_database_size_kb(Some(200), Some(4_000), 100);
+    fn scales_from_live_bytes_per_row() {
+        let estimated = estimate_database_size_kb(Some(200_000), Some(4_000), Some(1024.0));
 
-        assert_eq!(estimated, Some(8_000));
+        assert_eq!(estimated, Some(200_000));
     }
 
     #[test]
-    fn falls_back_to_default_average_for_empty_database() {
-        let estimated = estimate_database_size_kb(Some(10), None, 0);
+    fn never_reports_less_than_the_current_file_size() {
+        let estimated = estimate_database_size_kb(Some(10), Some(50_000), Some(1024.0));
 
-        assert_eq!(estimated, Some(420));
+        assert_eq!(estimated, Some(50_000));
+    }
+
+    #[test]
+    fn falls_back_to_default_bytes_per_row_when_database_is_empty() {
+        let estimated = estimate_database_size_kb(Some(10), None, None);
+
+        assert_eq!(estimated, Some(10));
     }
 
     #[test]
     fn returns_none_when_video_count_estimate_is_unavailable() {
-        let estimated = estimate_database_size_kb(None, Some(4_000), 100);
+        let estimated = estimate_database_size_kb(None, Some(4_000), Some(1024.0));
 
         assert_eq!(estimated, None);
     }

@@ -519,6 +519,7 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
             v-model="query"
             type="text"
             :placeholder="t('search.placeholder')"
+            :title="t('filter.searchHint')"
             class="search-input"
             @keyup.enter="search"
           />

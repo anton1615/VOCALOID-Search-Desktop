@@ -38,8 +38,8 @@ const historyController = createPagedPlaylistController({
   initialPage: page.value,
   initialPageSize: pageSize.value,
   initialSortOrder: sortOrder.value,
-  fetchPage: async (nextPage, nextPageSize, nextSortOrder) => {
-    const response = await api.getHistory(nextPage, nextPageSize, nextSortOrder)
+  fetchPage: async (nextPage, nextPageSize, nextSortOrder, nextSearchQuery) => {
+    const response = await api.getHistory(nextPage, nextPageSize, nextSortOrder, nextSearchQuery)
     return {
       total: response.total,
       has_next: response.has_next,
@@ -83,6 +83,7 @@ async function loadHistory() {
   loading.value = true
   try {
     historyController.setSortOrder(sortOrder.value)
+    historyController.setSearchQuery(searchQuery.value)
     const snapshot = await historyController.loadFirstPage()
     syncHistorySnapshot(snapshot)
   } catch (e) {
@@ -272,6 +273,7 @@ function toggleSortOrder() {
             v-model="searchQuery"
             type="text"
             :placeholder="t('filter.search')"
+            :title="t('filter.searchHint')"
             class="search-filter"
             @keyup.enter="applyFilters"
           />

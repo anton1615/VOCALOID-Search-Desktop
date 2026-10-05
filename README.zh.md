@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows 原生 • Tauri + Rust 後端 • Vue 3 前端 • SQLite FTS5 搜尋</strong>
+  <strong>Windows 原生 • Tauri + Rust 後端 • Vue 3 前端 • SQLite metadata 快取</strong>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <a href="https://tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB"></a>
   <a href="https://vuejs.org/"><img alt="Vue" src="https://img.shields.io/badge/Vue-3-42B883"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-backend-000000"></a>
-  <a href="https://www.sqlite.org/fts5.html"><img alt="Database" src="https://img.shields.io/badge/SQLite-FTS5-003B57"></a>
+  <a href="https://www.sqlite.org"><img alt="Database" src="https://img.shields.io/badge/SQLite-003B57"></a>
 </p>
 
 <p align="center">
@@ -75,7 +75,7 @@ VOCALOID Search Desktop 是為了那些想要使用 **原生本地 app**、而�
 
 - 🎧 **Spotify 式播放流程**，搭配嵌入式 Niconico 播放器
 - 🖥️ **原生 PiP 視窗**，會保持在最上層並與主視窗共享播放狀態
-- 🔎 **基於 SQLite FTS5 的高速本地搜尋**
+- 🔎 **基於本地 SQLite metadata 快取的高速搜尋**
 - 📚 **觀看紀錄 + Watch Later** 直接整合在桌面版裡
 - 🧠 **自訂公式排序 / 篩選**，可以按自己的偏好做排名
 - 💾 **本地優先的儲存模式**，同步後的搜尋與瀏覽速度更穩定
@@ -103,7 +103,7 @@ VOCALOID Search Desktop 是為了那些想要使用 **原生本地 app**、而�
 - 🧮 **自訂公式排序 / 篩選**：自由加權觀看數、喜歡數、收藏數與留言數
 - ⏭️ **自動跳過**：可選擇自動略過影片尾段
 - ▶️ **嵌入式播放器**：使用官方 Niconico 嵌入播放器做連續播放
-- 🏷️ **關鍵字 + 標籤搜尋**：支援標籤過濾的全文搜尋
+- 🏷️ **關鍵字 + 標籤搜尋**：對標題與標籤做子字串搜尋，支援 -詞 排除、OR、「片語」
 - ♾️ **無限滾動**：動態載入取代固定分頁
 - 🧪 **共享播放器邏輯**：主視窗與 PiP 使用同一套 playback event flow
 
@@ -166,7 +166,7 @@ Search / History / Watch Later 各自擁有獨立的 context、identity 與 vers
 |------|------|
 | **前端** | TypeScript, Vue 3, Vite, Tailwind CSS |
 | **後端** | Rust (Tauri 2.x) |
-| **資料庫** | SQLite (FTS5 全文搜尋) |
+| **資料庫** | SQLite metadata 快取 |
 | **資料來源** | 用於同步 / 搜尋快取的 [Niconico Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html)，以及用於單支影片播放 metadata enrichment 的 `watch/{id}?responseType=json` |
 
 ### 實作架構
@@ -183,14 +183,14 @@ Search / History / Watch Later 各自擁有獨立的 context、identity 與 vers
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
-│     Local SQLite Database (FTS5)        │
+│     Local SQLite Database               │
 └─────────────────────────────────────────┘
 ```
 
 ### 主要技術細節
 
 - 🔐 **自訂協定**：使用 `tauri://localhost`，避開 localhost 對嵌入播放器的限制
-- 🔎 **FTS5 全文搜尋**：利用 SQLite FTS5 進行快速關鍵字 / 標籤搜尋
+- 🔎 **本地子字串搜尋**：對快取的標題與標籤進行快速關鍵字 / 標籤搜尋
 - 🧮 **公式化評分**：可自訂權重以彈性排序
 - 🔄 **Versioned List Contexts**：Search / History / Watch Later 各自維持穩定的 context identity
 - 🪄 **Unified Player Core**：主視窗與 PiP 共用播放狀態與事件處理邏輯
@@ -366,6 +366,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - 📦 提供 **離線播放** 所需的本地下載能力
 - 🗂️ 發展超越 Watch Later 的 **自訂播放清單**
 - 🔤 **自訂介面字體**，打造個人化外觀
+- 🪟 **最小化至系統匣** 後持續在背景執行
+- 🔄 **排程同步資料庫**
+- 🛠️ **修正資料庫同步後返回搜尋頁面時，未立即套用「排除已觀看影片」條件的問題**
 
 ---
 

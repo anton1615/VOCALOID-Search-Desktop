@@ -49,7 +49,8 @@
     "recent7days": "Last 7 Days",
     "recent30days": "Last 30 Days",
     "recent1year": "Last Year",
-    "formulaPreview": "Score = {view}×Views + {mylist}×Mylists + {comment}×Comments + {like}×Likes"
+    "formulaPreview": "Score = {view}×Views + {mylist}×Mylists + {comment}×Comments + {like}×Likes",
+    "searchHint": "space = AND, OR = or, -term = exclude, \"two words\" = phrase"
   },
   "player": {
     "selectVideo": "Select a video from the list",
@@ -88,6 +89,7 @@
     "cancel": "Cancel",
     "syncProgress": "Sync Progress",
     "videosFetched": "videos",
+    "syncFailedTitle": "Sync failed",
     "confirmClear": "This will clear existing data and re-fetch. This may take hours. Continue?",
     "storageTitle": "Storage",
     "dataDirectory": "Data directory",

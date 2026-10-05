@@ -20,18 +20,21 @@ interface CreatePagedPlaylistControllerOptions {
   initialPage: number
   initialPageSize: number
   initialSortOrder: 'desc' | 'asc'
-  fetchPage: (page: number, pageSize: number, sortOrder: 'desc' | 'asc') => Promise<PlaylistPageResponse>
+  initialSearchQuery?: string
+  fetchPage: (page: number, pageSize: number, sortOrder: 'desc' | 'asc', searchQuery: string) => Promise<PlaylistPageResponse>
 }
 
 export function createPagedPlaylistController({
   initialPage,
   initialPageSize,
   initialSortOrder,
+  initialSearchQuery = '',
   fetchPage,
 }: CreatePagedPlaylistControllerOptions) {
   let page = initialPage
   let pageSize = initialPageSize
   let sortOrder = initialSortOrder
+  let searchQuery = initialSearchQuery
   let results: Video[] = []
   let totalCount = 0
   let hasNext = false
@@ -53,9 +56,14 @@ export function createPagedPlaylistController({
       page = 1
     },
 
+    setSearchQuery(nextSearchQuery: string) {
+      searchQuery = nextSearchQuery
+      page = 1
+    },
+
     async loadFirstPage(): Promise<Snapshot> {
       page = 1
-      const response = await fetchPage(page, pageSize, sortOrder)
+      const response = await fetchPage(page, pageSize, sortOrder, searchQuery)
       results = response.results
       totalCount = response.total
       hasNext = response.has_next
@@ -68,7 +76,7 @@ export function createPagedPlaylistController({
       }
 
       page += 1
-      const response = await fetchPage(page, pageSize, sortOrder)
+      const response = await fetchPage(page, pageSize, sortOrder, searchQuery)
       results = mergePagedResults(results, response.results)
       totalCount = response.total
       hasNext = response.has_next

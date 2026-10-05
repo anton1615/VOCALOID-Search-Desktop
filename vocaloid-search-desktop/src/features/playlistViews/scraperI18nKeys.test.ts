@@ -72,6 +72,7 @@ describe('scraper i18n keys', () => {
     expect(source).toContain('"maxDaysPlaceholder"')
     expect(source).toContain('"maxDaysHint"')
     expect(source).toContain('"syncConfirmAction"')
+    expect(source).toContain('"syncFailedTitle"')
   })
 
   test.each([
@@ -109,6 +110,7 @@ describe('scraper i18n keys', () => {
     expect(source).toContain("t('scraper.maxDaysPlaceholder')")
     expect(source).toContain("t('scraper.maxDaysHint')")
     expect(source).toContain("t('scraper.syncConfirmAction')")
+    expect(source).toContain("t('scraper.syncFailedTitle')")
     expect(source).toContain("t('scraper.categoryMusic')")
     expect(source).toContain("t('scraper.categoryGame')")
     expect(source).toContain("t('scraper.categoryAnime')")

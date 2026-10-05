@@ -234,6 +234,45 @@ vocaloid-search-desktop/
 - 只有 playback identity/session 改變或 playback 清除時才重設 readiness；跨 list
   同 id 仍是新 session，主視窗與 PiP 共用此契約
 
+### 14. Search text syntax（三個 view 與同步一致）
+
+- Search / History / Watch Later 的搜尋框共用同一套語法，實作在
+  `src-tauri/src/search_query.rs`：空白 = AND、`OR`（前後需空白）、`"..."` =
+  片語、`-詞` = 排除（`-` 與詞之間不可有空白；`- 詞` 視為字面）。
+- 只有負向詞的查詢不匹配任何列（與 snapshot API 行為一致：對這種查詢回傳 0
+  筆），渲染成 `0`；不可當成「排除該詞後全選」。
+- 詞比對使用 `LIKE ... ESCAPE '\'`，`%`/`_`/`\` 由 `like_pattern` 轉義；videos
+  比對 `title` 與 `tags`，History / Watch Later 只比對 `title`。
+- History / Watch Later 的 `get_history` / `get_watch_later` 必須同時過濾
+  count（`get_history_count` / `get_watch_later_count`），否則 `total` /
+  `has_next` 會與實際結果不一致。
+- 搜尋**不經過 FTS**：`video_fts` 表與其 trigger 已從 schema 移除，既有資料庫會在
+  `init_db` 的 `drop_legacy_video_fts` 中被清掉；不要再把 FTS 加回來（README 也
+  不應宣稱 FTS5）。
+
+### 15. videos.db storage / auto_vacuum
+
+- `videos.db` 使用 `auto_vacuum=FULL`（`init_db` → `ensure_cache_auto_vacuum`），
+  讓同步把範圍縮小後檔案跟著截斷，不停在歷史高水位。
+- 既有 DB 需要一次性 `VACUUM` 轉換；該次會先檢查可用空間（不足就跳過，下次啟動
+  再試），失敗是安全的。轉換是唯一的暫存尖峰：FULL 的縮檔是就地搬頁，不需要暫存
+  檔，同步期間不會出現 2 倍峰值。
+- `user_data.db` 維持預設（沒有大量刪除，開啟只是多餘負擔）。
+- 同步大小預估（`scraper_preflight::estimate_database_size_kb`）以
+  `(page_count − freelist_count) × page_size ÷ rows` 為基準，再取
+  `max(需要量, 目前檔案大小)`；FTS 移除與 VACUUM 的結果都會自動反映。
+
+### 16. 同步失敗回報與工作列進度
+
+- snapshot API 請求失敗（網路錯誤、非 2xx、JSON 解析失敗）一律回 `Err`、**不重試**：
+  `scraper.rs` 的 `SnapshotRequestError` → `run_scraper` 把 `progress.status` 設為
+  `error: <訊息>`，`ScraperView` 顯示 `syncFailedTitle` 警告。
+- 例外：offset 已達上限時的 `400` 視為正常換窗結束，不算失敗。
+- `run_scraper` 同步更新工作列進度：`Indeterminate` → 取得 `totalCount` 後
+  `Normal` + 百分比 → 任何結束（完成／取消／失敗）都清除。
+- 失敗時資料庫會停在「已清空」狀態（`clear_videos` 在抓取前執行），UI 必須讓
+  使用者看得出來，不可靜默當成完成。
+
 ## OpenSpec 使用原則
 
 - 本 workspace 目前包含 `openspec/`；功能新增、重大修復、重構應遵循

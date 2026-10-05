@@ -304,8 +304,8 @@ export const api = {
     return invoke('get_watched')
   },
   
-  getHistory: async (page: number = 1, pageSize: number = 50, sortDirection?: string): Promise<HistoryResponse> => {
-    return invoke('get_history', { page, pageSize, sortDirection })
+  getHistory: async (page: number = 1, pageSize: number = 50, sortDirection?: string, searchQuery: string = ''): Promise<HistoryResponse> => {
+    return invoke('get_history', { page, pageSize, sortDirection, searchQuery })
   },
   
   getScraperConfig: async (): Promise<ScraperConfig> => {
@@ -448,8 +448,8 @@ export const api = {
     return invoke('is_in_watch_later', { videoId })
   },
   
-  getWatchLater: async (page: number = 1, pageSize: number = 50, sortDirection?: string): Promise<WatchLaterResponse> => {
-    return invoke('get_watch_later', { page, pageSize, sortDirection })
+  getWatchLater: async (page: number = 1, pageSize: number = 50, sortDirection?: string, searchQuery: string = ''): Promise<WatchLaterResponse> => {
+    return invoke('get_watch_later', { page, pageSize, sortDirection, searchQuery })
   },
   
   getWatchLaterCount: async (): Promise<number> => {

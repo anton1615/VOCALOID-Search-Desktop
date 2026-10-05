@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows ネイティブ • Tauri + Rust バックエンド • Vue 3 フロントエンド • SQLite FTS5 検索</strong>
+  <strong>Windows ネイティブ • Tauri + Rust バックエンド • Vue 3 フロントエンド • SQLite metadata キャッシュ</strong>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <a href="https://tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB"></a>
   <a href="https://vuejs.org/"><img alt="Vue" src="https://img.shields.io/badge/Vue-3-42B883"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-backend-000000"></a>
-  <a href="https://www.sqlite.org/fts5.html"><img alt="Database" src="https://img.shields.io/badge/SQLite-FTS5-003B57"></a>
+  <a href="https://www.sqlite.org"><img alt="Database" src="https://img.shields.io/badge/SQLite-003B57"></a>
 </p>
 
 <p align="center">
@@ -75,7 +75,7 @@ VOCALOID Search Desktop は、セルフホスト型ウェブサービスでは�
 
 - 🎧 **Spotify ライクな再生フロー** と埋め込みニコニコプレイヤー
 - 🖥️ **ネイティブ PiP ウィンドウ** が常時最前面で再生状態を共有
-- 🔎 **SQLite FTS5 ベースの高速ローカル検索**
+- 🔎 **ローカル SQLite metadata キャッシュによる高速検索**
 - 📚 **視聴履歴 + Watch Later** をアプリ内に統合
 - 🧠 **数式ベースの並べ替え / フィルタ** で好みの順位付けが可能
 - 💾 **ローカルファーストな保存モデル** により、同期後の閲覧と検索が高速
@@ -103,7 +103,7 @@ VOCALOID Search Desktop は、セルフホスト型ウェブサービスでは�
 - 🧮 **カスタム数式での並べ替え / フィルタ**: 再生数・いいね・マイリスト・コメント数を自由に重み付け
 - ⏭️ **オートスキップ**: 動画終盤を自動でスキップ可能
 - ▶️ **埋め込みプレイヤー**: 公式ニコニコ埋め込みプレイヤーによる連続再生
-- 🏷️ **キーワード + タグ検索**: タグフィルタ付き全文検索
+- 🏷️ **キーワード + タグ検索**: タイトルとタグの部分一致検索。-語 で除外、OR、"フレーズ" に対応
 - ♾️ **無限スクロール**: 固定ページではなく動的読み込み
 - 🧪 **共有プレイヤーロジック**: メインウィンドウと PiP が同じ再生イベントフローを利用
 
@@ -166,7 +166,7 @@ Search で「視聴済み除外」が有効なまま再生を始めると、そ�
 |---------|------|
 | **フロントエンド** | TypeScript, Vue 3, Vite, Tailwind CSS |
 | **バックエンド** | Rust (Tauri 2.x) |
-| **データベース** | SQLite (FTS5 全文検索) |
+| **データベース** | SQLite metadata キャッシュ |
 | **データソース** | 同期 / 検索キャッシュ用の [ニコニコ Snapshot API v2](https://site.nicovideo.jp/search-api-docs/snapshot.html)、単一動画の再生 metadata enrichment 用の `watch/{id}?responseType=json` |
 
 ### 実装アーキテクチャ
@@ -183,14 +183,14 @@ Search で「視聴済み除外」が有効なまま再生を始めると、そ�
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
-│     Local SQLite Database (FTS5)        │
+│     Local SQLite Database               │
 └─────────────────────────────────────────┘
 ```
 
 ### 主な技術的詳細
 
 - 🔐 **カスタムプロトコル**: `tauri://localhost` を利用し、localhost 制約を回避
-- 🔎 **FTS5 全文検索**: SQLite FTS5 による高速なキーワード / タグ検索
+- 🔎 **ローカル部分一致検索**: キャッシュされたタイトルとタグに対する高速なキーワード / タグ検索
 - 🧮 **数式ベースのスコアリング**: 柔軟な重み付けで並べ替え可能
 - 🔄 **Versioned List Contexts**: Search / History / Watch Later が安定した context identity を保持
 - 🪄 **Unified Player Core**: メインウィンドウと PiP 間で再生状態とイベント処理を共有
@@ -366,6 +366,9 @@ vocaloid-search-desktop/src-tauri/target/release/vocaloid-search-desktop.exe
 - 📦 **オフライン再生** のためのローカルダウンロード
 - 🗂️ **Watch Later を超えるカスタムプレイリスト**
 - 🔤 **インターフェースフォントのカスタマイズ** で好みの見た目に
+- 🪟 **システムトレイに最小化** してバックグラウンドで実行
+- 🔄 **データベースの定期同期**
+- 🔧 **データベース同期後に検索ページへ戻った際、「視聴済み動画を除外」する条件がすぐに適用されない問題を修正**
 
 ---
 

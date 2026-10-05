@@ -890,10 +890,11 @@ fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (Strin
     let mut where_clauses: Vec<String> = Vec::new();
     
     if !request.query.is_empty() {
-        where_clauses.push("(v.title LIKE ? OR v.tags LIKE ?)".to_string());
-        let query_pattern = format!("%{}%", request.query.replace('%', r"\%").replace('_', r"\_"));
-        params.push(query_pattern.clone());
-        params.push(query_pattern);
+        let text = crate::search_query::render_like(&request.query, &["v.title", "v.tags"]);
+        if !text.sql.is_empty() {
+            where_clauses.push(text.sql);
+            params.extend(text.params);
+        }
     }
     
     if let Some(ref filters) = request.filters {
@@ -1035,10 +1036,13 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
     let mut where_clauses: Vec<String> = Vec::new();
     
     if !request.query.is_empty() {
-        where_clauses.push("(v.title LIKE ? OR v.tags LIKE ?)".to_string());
-        let query_pattern = format!("%{}%", request.query.replace('%', r"\%").replace('_', r"\_"));
-        params.push(Box::new(query_pattern.clone()));
-        params.push(Box::new(query_pattern));
+        let text = crate::search_query::render_like(&request.query, &["v.title", "v.tags"]);
+        if !text.sql.is_empty() {
+            where_clauses.push(text.sql);
+            for param in text.params {
+                params.push(Box::new(param));
+            }
+        }
     }
     
     if let Some(ref filters) = request.filters {
@@ -1215,10 +1219,13 @@ pub async fn search(
     let mut where_clauses: Vec<String> = Vec::new();
     
     if !request.query.is_empty() {
-        where_clauses.push("(v.title LIKE ? OR v.tags LIKE ?)".to_string());
-        let query_pattern = format!("%{}%", request.query.replace('%', "\\%").replace('_', "\\_"));
-        params.push(Box::new(query_pattern.clone()));
-        params.push(Box::new(query_pattern));
+        let text = crate::search_query::render_like(&request.query, &["v.title", "v.tags"]);
+        if !text.sql.is_empty() {
+            where_clauses.push(text.sql);
+            for param in text.params {
+                params.push(Box::new(param));
+            }
+        }
     }
     
     if let Some(ref filters) = request.filters {
@@ -1650,10 +1657,11 @@ pub async fn get_history(
     page: usize,
     page_size: usize,
     sort_direction: Option<String>,
+    search_query: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<HistoryResponse, String> {
-    let total = state.db.get_history_count().map_err(|e| e.to_string())?;
-    let entries = state.db.get_history(page, page_size, sort_direction.as_deref()).map_err(|e| e.to_string())?;
+    let total = state.db.get_history_count(search_query.as_deref()).map_err(|e| e.to_string())?;
+    let entries = state.db.get_history(page, page_size, sort_direction.as_deref(), search_query.as_deref()).map_err(|e| e.to_string())?;
     
     let results: Vec<Video> = entries.iter().map(|entry| Video {
         id: entry.video_id.clone(),
@@ -1782,9 +1790,22 @@ pub async fn save_scraper_config(
     Ok(())
 }
 
+fn set_taskbar_progress(
+    app: &AppHandle,
+    status: tauri::window::ProgressBarStatus,
+    progress: Option<u64>,
+) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_progress_bar(tauri::window::ProgressBarState {
+            status: Some(status),
+            progress,
+        });
+    }
+}
+
 #[tauri::command]
 pub async fn run_scraper(
-    _app: AppHandle,
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let config = state.config.read().clone();
@@ -1803,6 +1824,7 @@ pub async fn run_scraper(
         let mut progress = state.scraper_progress.write();
         progress.status = "fetching".to_string();
     }
+    set_taskbar_progress(&app, tauri::window::ProgressBarStatus::Indeterminate, None);
     
     let (tx, rx) = async_channel::bounded::<()>(1);
     {
@@ -1814,15 +1836,27 @@ pub async fn run_scraper(
     let db = state.db.clone();
     let progress = state.scraper_progress.clone();
     let cancel_receiver = state.scraper_cancel.clone();
+    let taskbar_app = app.clone();
     
     tokio::spawn(async move {
         let progress_clone = progress.clone();
         let db_clone = db.clone();
+        let progress_app = taskbar_app.clone();
         
         let result = scraper.fetch_videos(move |fetched, total| {
-            let mut p = progress_clone.write();
-            p.videos_fetched = fetched;
-            p.total_expected = total;
+            {
+                let mut p = progress_clone.write();
+                p.videos_fetched = fetched;
+                p.total_expected = total;
+            }
+            let (status, percent) = match total {
+                Some(total) if total > 0 => (
+                    tauri::window::ProgressBarStatus::Normal,
+                    Some(((fetched as u64) * 100 / total as u64).min(100)),
+                ),
+                _ => (tauri::window::ProgressBarStatus::Indeterminate, None),
+            };
+            set_taskbar_progress(&progress_app, status, percent);
         }).await;
         
         {
@@ -1845,6 +1879,7 @@ pub async fn run_scraper(
                         let mut p = progress.write();
                         p.status = format!("error: {}", e);
                         p.is_running = false;
+                        set_taskbar_progress(&taskbar_app, tauri::window::ProgressBarStatus::None, None);
                         return;
                     }
                 }
@@ -1863,6 +1898,7 @@ pub async fn run_scraper(
                 p.is_running = false;
             }
         }
+        set_taskbar_progress(&taskbar_app, tauri::window::ProgressBarStatus::None, None);
     });
     
     Ok(())
@@ -2273,12 +2309,12 @@ pub async fn get_sync_preflight_estimate(
     let current_database_size_kb = std::fs::metadata(db_path)
         .ok()
         .map(|metadata| metadata.len() / 1024);
-    let current_total_videos = state.db.get_total_videos().unwrap_or(0);
+    let live_bytes_per_row = state.db.live_bytes_per_row().ok().flatten();
 
     let estimated_database_size_kb = crate::scraper_preflight::estimate_database_size_kb(
         estimated_video_count,
         current_database_size_kb,
-        current_total_videos,
+        live_bytes_per_row,
     );
 
     let free_space_kb = crate::scraper_preflight::lookup_free_space_kb(&data_dir);
@@ -2363,9 +2399,10 @@ pub async fn get_watch_later(
     page: usize,
     page_size: usize,
     sort_direction: Option<String>,
+    search_query: Option<String>,
 ) -> Result<WatchLaterResponse, String> {
-    let total = state.db.get_watch_later_count().map_err(|e| e.to_string())?;
-    let entries = state.db.get_watch_later(page, page_size, sort_direction.as_deref()).map_err(|e| e.to_string())?;
+    let total = state.db.get_watch_later_count(search_query.as_deref()).map_err(|e| e.to_string())?;
+    let entries = state.db.get_watch_later(page, page_size, sort_direction.as_deref(), search_query.as_deref()).map_err(|e| e.to_string())?;
     
     let results_for_state: Vec<Video> = entries.iter().map(|entry| Video {
         id: entry.video_id.clone(),
@@ -2455,7 +2492,7 @@ pub async fn get_watch_later(
 pub async fn get_watch_later_count(
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
-    state.db.get_watch_later_count().map_err(|e| e.to_string())
+    state.db.get_watch_later_count(None).map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub async fn preview_watch_data_import(
@@ -2672,8 +2709,9 @@ mod tests {
         let (sql, params, _count_sql) = build_search_query(&request, &[]);
         
         assert!(sql.contains("WHERE"));
-        assert!(sql.contains("v.title LIKE ? OR v.tags LIKE ?"));
-        assert_eq!(params.len(), 2);
+        assert!(sql.contains("v.title LIKE ? ESCAPE '\\'"));
+        assert!(sql.contains("v.tags LIKE ? ESCAPE '\\'"));
+        assert_eq!(params, vec!["%VOCALOID%", "%VOCALOID%"]);
     }
 
     #[test]

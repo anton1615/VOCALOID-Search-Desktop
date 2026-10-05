@@ -487,8 +487,8 @@ impl AppState {
         &self,
     ) -> Result<Option<ListContextId>, rusqlite::Error> {
         let watched_ids: HashSet<String> = self.db.get_all_watched_video_ids()?.into_iter().collect();
-        let history_total = self.db.get_history_count()?;
-        let watch_later_total = self.db.get_watch_later_count()?;
+        let history_total = self.db.get_history_count(None)?;
+        let watch_later_total = self.db.get_watch_later_count(None)?;
 
         {
             let mut contexts = self.list_contexts.write();
