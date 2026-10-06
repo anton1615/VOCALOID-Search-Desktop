@@ -409,6 +409,7 @@ pub struct SyncPreflightEstimate {
     pub estimated_video_count: Option<usize>,
     pub estimated_database_size_kb: Option<u64>,
     pub free_space_kb: Option<u64>,
+    pub unsupported_query_issue: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

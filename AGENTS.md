@@ -238,9 +238,14 @@ vocaloid-search-desktop/
 
 - Search / History / Watch Later 的搜尋框共用同一套語法，實作在
   `src-tauri/src/search_query.rs`：空白 = AND、`OR`（前後需空白）、`"..."` =
-  片語、`-詞` = 排除（`-` 與詞之間不可有空白；`- 詞` 視為字面）。
+  片語、`-詞` = 排除（`-` 與詞之間不可有空白；`- 詞` 視為字面）、`*` = 全部
+  （僅本地三個清單搜尋；`*` 只能是獨立 token，`"*"` 仍為字面）。
 - 只有負向詞的查詢不匹配任何列（與 snapshot API 行為一致：對這種查詢回傳 0
   筆），渲染成 `0`；不可當成「排除該詞後全選」。
+- `snapshot_query_issue` 守住同步路徑：snapshot API 沒有萬用字元、對「僅排除
+  詞」的查詢也回 0 筆，因此使用 `*` 或只有排除詞的 sync 必須在清空 `videos.db`
+  前被拒絕（`run_scraper` 回傳英文 issue message；preflight 以
+  `unsupported_query_issue` 回 `wildcard` / `only_excluded`）。
 - 詞比對使用 `LIKE ... ESCAPE '\'`，`%`/`_`/`\` 由 `like_pattern` 轉義；videos
   比對 `title` 與 `tags`，History / Watch Later 只比對 `title`。
 - History / Watch Later 的 `get_history` / `get_watch_later` 必須同時過濾

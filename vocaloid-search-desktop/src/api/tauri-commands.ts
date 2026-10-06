@@ -182,6 +182,7 @@ export interface SyncPreflightEstimate {
   estimated_video_count: number | null
   estimated_database_size_kb: number | null
   free_space_kb: number | null
+  unsupported_query_issue: string | null
 }
 
 export interface WatchDataImportCounts {

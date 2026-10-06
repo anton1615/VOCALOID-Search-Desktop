@@ -103,7 +103,7 @@ VOCALOID Search Desktop is designed for people who want a **native local app** i
 - 🧮 **Custom Formula Sorting & Filtering**: Weight views, likes, mylists, and comments using your own formula
 - ⏭️ **Auto-Skip**: Automatically skip video endings when desired
 - ▶️ **Embedded Player**: Continuous playback with the official Niconico embed player
-- 🏷️ **Keyword + Tag Search**: substring search over titles and tags, with -term exclusion, OR, and "quoted phrases"
+- 🏷️ **Keyword + Tag Search**: substring search over titles and tags, with -term exclusion, OR, "quoted phrases", and a standalone `*` that matches every row in the Search, History, and Watch Later search boxes; the sync keyword field rejects queries the snapshot API cannot express (no wildcard, no exclusion-only query)
 - ♾️ **Infinite Scroll**: Dynamic loading instead of fixed pagination
 - 🧪 **Shared Player Logic**: Main window and PiP consume the same playback event flow
 

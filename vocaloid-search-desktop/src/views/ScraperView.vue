@@ -49,6 +49,7 @@ const importSuccess = ref<WatchDataImportCompleted | null>(null)
 const importError = ref('')
 const importPreviewLoading = ref(false)
 const importExecuteLoading = ref(false)
+const syncStartError = ref('')
 
 const syncErrorMessage = computed(() => {
   const status = progress.value.status
@@ -62,6 +63,19 @@ const isStorageInsufficient = computed(() => {
     return false
   }
   return estimated > free
+})
+
+const hasUnsupportedQuery = computed(() => Boolean(preflightEstimate.value?.unsupported_query_issue))
+
+const unsupportedQueryDetailKey = computed(() => {
+  switch (preflightEstimate.value?.unsupported_query_issue) {
+    case 'wildcard':
+      return 'scraper.unsupportedQueryWildcard'
+    case 'only_excluded':
+      return 'scraper.unsupportedQueryOnlyExcluded'
+    default:
+      return ''
+  }
 })
 
 const selectedImportFileName = computed(() => {
@@ -120,6 +134,7 @@ async function saveConfig() {
 async function startSync() {
   preflightLoading.value = true
   preflightEstimate.value = null
+  syncStartError.value = ''
   try {
     preflightEstimate.value = await api.getSyncPreflightEstimate()
   } catch (e) {
@@ -132,11 +147,13 @@ async function startSync() {
 
 async function runScraper() {
   showConfirm.value = false
+  syncStartError.value = ''
   try {
     await api.runScraper()
     startPolling()
   } catch (e) {
     console.error('Failed to start scraper:', e)
+    syncStartError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -416,8 +433,12 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div v-if="progress.is_running || progress.status !== 'idle'" class="progress-card">
+    <div v-if="progress.is_running || progress.status !== 'idle' || syncStartError" class="progress-card">
       <h3>{{ t('scraper.syncProgress') }}</h3>
+      <div v-if="syncStartError" class="alert alert-warning sync-start-error-alert">
+        <div class="status-title">{{ t('scraper.syncFailedTitle') }}</div>
+        <div class="status-message">{{ syncStartError }}</div>
+      </div>
       <div v-if="syncErrorMessage" class="alert alert-warning sync-error-alert">
         <div class="status-title">{{ t('scraper.syncFailedTitle') }}</div>
         <div class="status-message">{{ syncErrorMessage }}</div>
@@ -454,6 +475,10 @@ onUnmounted(() => {
             <div class="status-title">{{ t('scraper.insufficientStorageTitle') }}</div>
             <div class="status-message">{{ t('scraper.insufficientStorageMessage') }}</div>
           </div>
+          <div v-if="hasUnsupportedQuery" class="alert alert-warning unsupported-query-alert">
+            <div class="status-title">{{ t('scraper.unsupportedQueryTitle') }}</div>
+            <div v-if="unsupportedQueryDetailKey" class="status-message">{{ t(unsupportedQueryDetailKey) }}</div>
+          </div>
           <div class="modal-info-row">
             <span>{{ t('scraper.estimatedVideos') }}</span>
             <strong>{{ formatVideoCount(preflightEstimate?.estimated_video_count ?? null) }}</strong>
@@ -469,7 +494,9 @@ onUnmounted(() => {
         </template>
         <div class="modal-actions">
           <button @click="showConfirm = false" class="btn-secondary">{{ t('scraper.cancel') }}</button>
-          <button v-if="!isStorageInsufficient" @click="runScraper" class="btn-primary">{{ t('scraper.syncConfirmAction') }}</button>
+          <template v-if="!isStorageInsufficient">
+            <button v-if="!hasUnsupportedQuery" @click="runScraper" class="btn-primary">{{ t('scraper.syncConfirmAction') }}</button>
+          </template>
         </div>
       </div>
     </div>
@@ -600,6 +627,14 @@ h2 {
 
 .insufficient-storage-alert {
   margin-bottom: 1rem;
+}
+
+.unsupported-query-alert {
+  margin-bottom: 1rem;
+}
+
+.sync-start-error-alert {
+  margin-bottom: 1.5rem;
 }
 
 .path-info {

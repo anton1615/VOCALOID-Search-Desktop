@@ -2028,6 +2028,15 @@ mod tests {
         assert_eq!(db.get_history_count(Some("-ミク")).unwrap(), 0);
         assert!(db.get_history(1, 50, None, Some("-ミク")).unwrap().is_empty());
 
+        // A bare `*` matches every row, so `* -term` is how a list search asks
+        // for "everything except ...".
+        assert_eq!(db.get_history_count(Some("*")).unwrap(), 3);
+        assert_eq!(db.get_watch_later_count(Some("*")).unwrap(), 1);
+        let inverted = db.get_history(1, 50, None, Some("* -ミク")).unwrap();
+        assert_eq!(inverted.len(), 1);
+        assert_eq!(inverted[0].video_id, "sm3");
+        assert_eq!(db.get_history_count(Some("* -ミク")).unwrap(), 1);
+
         // Positive term plus exclusion: ミク AND NOT ボーカル.
         let filtered = db.get_history(1, 50, None, Some("ミク -ボーカル")).unwrap();
         assert_eq!(filtered.len(), 1);

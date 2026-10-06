@@ -50,7 +50,7 @@
     "recent30days": "直近30日",
     "recent1year": "直近1年",
     "formulaPreview": "スコア = {view}×再生 + {mylist}×マイリスト + {comment}×コメント + {like}×いいね",
-    "searchHint": "空白 = AND、OR = または、-語 = 除外、\"二 語\" = フレーズ"
+    "searchHint": "空白 = AND、OR = または、-語 = 除外、\"二 語\" = フレーズ、* = すべて（リスト検索のみ）"
   },
   "player": {
     "selectVideo": "リストから動画を選択",
@@ -146,7 +146,10 @@
     "importPreviewError": "視聴データのインポートプレビューに失敗しました。",
     "importExecuteError": "視聴データのインポートに失敗しました。",
     "syncConfirmAction": "同期を開始",
-    "preflightLoading": "同期要件を確認しています..."
+    "preflightLoading": "同期要件を確認しています...",
+    "unsupportedQueryTitle": "同期APIが対応していないクエリです",
+    "unsupportedQueryWildcard": "snapshot API に \"*\" のワイルドカードはありません。\"*\" はリテラルのアスタリスクとしてのみ一致します。削除するかキーワードを使ってください。",
+    "unsupportedQueryOnlyExcluded": "除外語だけのクエリは snapshot API では 0 件になります。キーワードを1つ以上追加してください。"
   },
   "history": {
     "title": "視聴履歴",

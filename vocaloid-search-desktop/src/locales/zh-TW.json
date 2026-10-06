@@ -50,7 +50,7 @@
     "recent30days": "最近30日",
     "recent1year": "最近1年",
     "formulaPreview": "評分 = {view}×播放 + {mylist}×清單 + {comment}×留言 + {like}×喜歡",
-    "searchHint": "用空白 = AND，OR = 或，-詞 = 排除，\"詞 詞\" = 片語"
+    "searchHint": "用空白 = AND，OR = 或，-詞 = 排除，\"詞 詞\" = 片語，* = 全部（僅清單搜尋）"
   },
   "player": {
     "selectVideo": "從清單中選擇影片播放",
@@ -146,7 +146,10 @@
     "importPreviewError": "無法預覽觀看資料匯入。",
     "importExecuteError": "無法匯入觀看資料。",
     "syncConfirmAction": "開始同步",
-    "preflightLoading": "正在檢查同步需求..."
+    "preflightLoading": "正在檢查同步需求...",
+    "unsupportedQueryTitle": "同步 API 不支援這個查詢",
+    "unsupportedQueryWildcard": "snapshot API 沒有 \"*\" 萬用字元，\"*\" 只會比對字面的星號。請移除或改用關鍵詞。",
+    "unsupportedQueryOnlyExcluded": "只有排除詞的查詢在 snapshot API 會回傳 0 筆，請至少加一個關鍵詞。"
   },
   "history": {
     "title": "觀看歷史",

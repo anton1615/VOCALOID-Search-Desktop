@@ -1790,6 +1790,14 @@ pub async fn save_scraper_config(
     Ok(())
 }
 
+/// Machine code for a sync query the snapshot API cannot express, if any.
+///
+/// The snapshot `q` API has no wildcard operator, so queries using one are
+/// refused instead of silently syncing a wrong subset.
+fn unsupported_query_issue(config: &ScraperConfig) -> Option<String> {
+    crate::search_query::snapshot_query_issue(&config.query).map(|issue| issue.code().to_string())
+}
+
 fn set_taskbar_progress(
     app: &AppHandle,
     status: tauri::window::ProgressBarStatus,
@@ -1809,7 +1817,11 @@ pub async fn run_scraper(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let config = state.config.read().clone();
-    
+
+    if let Some(issue) = crate::search_query::snapshot_query_issue(&config.query) {
+        return Err(issue.message().to_string());
+    }
+
     {
         let mut progress = state.scraper_progress.write();
         progress.is_running = true;
@@ -2301,10 +2313,22 @@ pub async fn get_sync_preflight_estimate(
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncPreflightEstimate, String> {
     let config = state.config.read().clone();
-    let estimated_video_count = crate::scraper_preflight::estimate_video_count(&config).await;
 
     use crate::database::{get_data_dir, get_db_path};
     let data_dir = get_data_dir(&app);
+    let free_space_kb = crate::scraper_preflight::lookup_free_space_kb(&data_dir);
+
+    if let Some(code) = unsupported_query_issue(&config) {
+        return Ok(SyncPreflightEstimate {
+            estimated_video_count: None,
+            estimated_database_size_kb: None,
+            free_space_kb,
+            unsupported_query_issue: Some(code),
+        });
+    }
+
+    let estimated_video_count = crate::scraper_preflight::estimate_video_count(&config).await;
+
     let db_path = get_db_path(&app);
     let current_database_size_kb = std::fs::metadata(db_path)
         .ok()
@@ -2317,12 +2341,11 @@ pub async fn get_sync_preflight_estimate(
         live_bytes_per_row,
     );
 
-    let free_space_kb = crate::scraper_preflight::lookup_free_space_kb(&data_dir);
-
     Ok(SyncPreflightEstimate {
         estimated_video_count,
         estimated_database_size_kb,
         free_space_kb,
+        unsupported_query_issue: None,
     })
 }
 
@@ -2712,6 +2735,26 @@ mod tests {
         assert!(sql.contains("v.title LIKE ? ESCAPE '\\'"));
         assert!(sql.contains("v.tags LIKE ? ESCAPE '\\'"));
         assert_eq!(params, vec!["%VOCALOID%", "%VOCALOID%"]);
+    }
+
+    #[test]
+    fn build_query_with_wildcard_and_exclusion() {
+        let request = SearchRequest {
+            query: "* -初音ミク".to_string(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: Some(make_default_sort()),
+            formula_filter: None,
+        };
+
+        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+
+        assert!(sql.contains("WHERE 1 AND NOT (("));
+        assert!(sql.contains("v.title LIKE ? ESCAPE '\\'"));
+        assert!(sql.contains("v.tags LIKE ? ESCAPE '\\'"));
+        assert_eq!(params, vec!["%初音ミク%", "%初音ミク%"]);
     }
 
     #[test]
@@ -4131,5 +4174,37 @@ mod tests {
         ThumbInfo {
             user_nickname: Some("MikuP".to_string()),
         }
+    }
+
+    fn scraper_config_with_query(query: &str) -> ScraperConfig {
+        ScraperConfig {
+            query: query.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn unsupported_query_issue_reports_wildcard() {
+        assert_eq!(
+            unsupported_query_issue(&scraper_config_with_query("* -foo")),
+            Some("wildcard".to_string())
+        );
+    }
+
+    #[test]
+    fn unsupported_query_issue_reports_only_excluded() {
+        assert_eq!(
+            unsupported_query_issue(&scraper_config_with_query("-foo")),
+            Some("only_excluded".to_string())
+        );
+    }
+
+    #[test]
+    fn unsupported_query_issue_accepts_supported_queries() {
+        assert_eq!(unsupported_query_issue(&scraper_config_with_query("")), None);
+        assert_eq!(
+            unsupported_query_issue(&scraper_config_with_query("VOCALOID ミク")),
+            None
+        );
     }
 }
