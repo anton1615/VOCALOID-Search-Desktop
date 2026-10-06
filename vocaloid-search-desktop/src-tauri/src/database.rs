@@ -1,6 +1,6 @@
 use crate::models::{
-    normalize_title_html_entities, WatchDataImportCompleted, WatchDataImportConfirmedSummary,
-    WatchDataImportCounts, WatchDataImportPreviewResponse,
+    normalize_title_html_entities, BlockedUploader, WatchDataImportCompleted,
+    WatchDataImportConfirmedSummary, WatchDataImportCounts, WatchDataImportPreviewResponse,
 };
 use chrono::NaiveDateTime;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS watch_later (
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS uploader_blacklist (
+    uploader_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS migration_markers (
@@ -1421,6 +1427,64 @@ impl Database {
         let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|param| param.as_ref()).collect();
         let count: i64 = conn.query_row(&sql, &params_refs[..], |row| row.get(0))?;
         Ok(count as usize)
+    }
+
+    /// Uploader ids excluded from local Search results, in no particular order.
+    pub fn get_blocked_uploader_ids(&self) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let mut stmt = conn.prepare("SELECT uploader_id FROM uploader_blacklist")?;
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(|entry| entry.ok())
+            .collect();
+        Ok(ids)
+    }
+
+    /// The blacklist as stored, newest entry first.
+    pub fn list_blocked_uploaders(&self) -> Result<Vec<BlockedUploader>, rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        let mut stmt = conn.prepare(
+            "SELECT uploader_id, display_name, added_at FROM uploader_blacklist \
+             ORDER BY added_at DESC, rowid DESC",
+        )?;
+        let entries: Vec<BlockedUploader> = stmt
+            .query_map([], |row| {
+                Ok(BlockedUploader {
+                    uploader_id: row.get(0)?,
+                    display_name: row.get(1)?,
+                    added_at: row.get(2)?,
+                })
+            })?
+            .filter_map(|entry| entry.ok())
+            .collect();
+        Ok(entries)
+    }
+
+    /// Idempotently block an uploader. A `None` name keeps any name already stored;
+    /// a provided name refreshes it.
+    pub fn add_blocked_uploader(
+        &self,
+        uploader_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        conn.execute(
+            "INSERT INTO uploader_blacklist (uploader_id, display_name) VALUES (?, ?) \
+             ON CONFLICT(uploader_id) DO UPDATE SET display_name = \
+             COALESCE(excluded.display_name, uploader_blacklist.display_name)",
+            params![uploader_id, display_name],
+        )?;
+        Ok(())
+    }
+
+    /// Remove an uploader from the blacklist. Removing a missing id is a no-op.
+    pub fn remove_blocked_uploader(&self, uploader_id: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.connect_user_data()?;
+        conn.execute(
+            "DELETE FROM uploader_blacklist WHERE uploader_id = ?",
+            [uploader_id],
+        )?;
+        Ok(())
     }
 }
 
@@ -2799,5 +2863,62 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(config_value, "{\"query\":\"keep-me\"}");
+    }
+
+    #[test]
+    fn uploader_blacklist_crud_round_trip_is_idempotent() {
+        let paths = TestDbPaths::new("uploader-blacklist-crud");
+        init_db(&paths.videos, &paths.user_data).unwrap();
+        let db = paths.database();
+
+        // An untouched blacklist excludes nothing.
+        assert!(db.get_blocked_uploader_ids().unwrap().is_empty());
+        assert!(db.list_blocked_uploaders().unwrap().is_empty());
+
+        db.add_blocked_uploader("811012", Some("DECO*27")).unwrap();
+        // Adding the same uploader again must not duplicate or fail.
+        db.add_blocked_uploader("811012", Some("DECO*27")).unwrap();
+        db.add_blocked_uploader("900001", None).unwrap();
+
+        let mut ids = db.get_blocked_uploader_ids().unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["811012".to_string(), "900001".to_string()]);
+
+        let listed = db.list_blocked_uploaders().unwrap();
+        assert_eq!(listed.len(), 2);
+        // Newest insertion first, since added_at ties at one-second resolution.
+        assert_eq!(listed[0].uploader_id, "900001");
+        assert_eq!(listed[0].display_name, None);
+        assert!(!listed[0].added_at.is_empty());
+
+        let deco = listed
+            .iter()
+            .find(|entry| entry.uploader_id == "811012")
+            .unwrap();
+        assert_eq!(deco.display_name.as_deref(), Some("DECO*27"));
+
+        // A later add can backfill a name that was stored as NULL.
+        db.add_blocked_uploader("900001", Some("Later Name")).unwrap();
+        let listed = db.list_blocked_uploaders().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed
+                .iter()
+                .find(|entry| entry.uploader_id == "900001")
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("Later Name")
+        );
+        // Backfilling a name keeps the original insertion order.
+        assert_eq!(listed[0].uploader_id, "900001");
+
+        db.remove_blocked_uploader("811012").unwrap();
+        assert_eq!(db.get_blocked_uploader_ids().unwrap(), vec!["900001".to_string()]);
+        assert_eq!(db.list_blocked_uploaders().unwrap().len(), 1);
+
+        // Removing a missing id is a no-op.
+        db.remove_blocked_uploader("811012").unwrap();
+        assert_eq!(db.list_blocked_uploaders().unwrap().len(), 1);
     }
 }

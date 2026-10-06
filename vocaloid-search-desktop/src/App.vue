@@ -7,16 +7,19 @@ import { useI18n } from 'vue-i18n'
 
 import { api, type PlaylistType, type Video } from './api/tauri-commands'
 import PlayerColumn from './components/PlayerColumn.vue'
+import UploaderBlacklistDialog from './components/UploaderBlacklistDialog.vue'
 import { useAuthoritativePlaybackSync } from './composables/useAuthoritativePlaybackSync'
 import { i18n } from './i18n'
 import { useLocaleStore, type Locale } from './stores/locale'
 import { useThemeStore } from './stores/theme'
+import { useUploaderBlacklistStore } from './stores/uploaderBlacklist'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()
+const uploaderBlacklistStore = useUploaderBlacklistStore()
 const isLoading = ref(true)
 const listWidth = ref(40)
 const isDragging = ref(false)
@@ -174,6 +177,7 @@ function stopDrag() {
 
 let unlistenPipClosed: (() => void) | null = null
 let unlistenWatchDataImportComplete: (() => void) | null = null
+let unlistenUploaderBlacklistUpdated: (() => void) | null = null
 
 onMounted(async () => {
   try {
@@ -182,6 +186,9 @@ onMounted(async () => {
     unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
       console.log('[App] Received watch-data-import-complete event')
       await refreshActivePlayback()
+    })
+    unlistenUploaderBlacklistUpdated = await listen('uploader-blacklist-updated', async () => {
+      await uploaderBlacklistStore.refresh()
     })
   } catch (e) {
     handleFreshnessCheckError(e)
@@ -193,6 +200,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unlistenPipClosed) unlistenPipClosed()
   if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
+  if (unlistenUploaderBlacklistUpdated) unlistenUploaderBlacklistUpdated()
   stopDrag()
 })
 </script>
@@ -228,6 +236,9 @@ onUnmounted(() => {
           <select class="locale-select" v-model="localeStore.locale">
             <option v-for="opt in localeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
+          <button class="blacklist-toggle" :title="t('blacklist.open')" @click="uploaderBlacklistStore.openDialog()">
+            <span>🚫</span>
+          </button>
         </div>
       </div>
     </nav>
@@ -269,6 +280,8 @@ onUnmounted(() => {
       </template>
       <router-view v-else />
     </main>
+
+    <UploaderBlacklistDialog />
   </div>
 </template>
 
@@ -390,7 +403,8 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 
-.theme-toggle {
+.theme-toggle,
+.blacklist-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -404,7 +418,8 @@ onUnmounted(() => {
   font-size: 18px;
 }
 
-.theme-toggle:hover {
+.theme-toggle:hover,
+.blacklist-toggle:hover {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
 }

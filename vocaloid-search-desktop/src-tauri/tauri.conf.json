@@ -50,7 +50,8 @@
           "blob:",
           "https://secure-dcdn.cdn.nimg.jp",
           "https://nicovideo.cdn.nimg.jp",
-          "https://image.nicovideo.jp"
+          "https://image.nicovideo.jp",
+          "https://img.nicoprofile.nimg.jp"
         ],
         "media-src": [
           "'self'",

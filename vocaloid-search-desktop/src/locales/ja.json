@@ -181,5 +181,27 @@
     "minutesAgo": "{count}分前",
     "hoursAgo": "{count}時間前",
     "daysAgo": "{count}日前"
+  },
+  "blacklist": {
+    "title": "投稿者ブラックリスト",
+    "open": "投稿者ブラックリストを開く",
+    "searchPlaceholder": "投稿者名を検索...",
+    "searchHint": "名前を入力し、↑↓で選択、Enterで追加",
+    "empty": "ブラックリストは空です",
+    "noCandidates": "該当する投稿者が見つかりません",
+    "videoCount": "{count} 本の動画",
+    "remove": "削除",
+    "removeConfirmTitle": "ブロックを解除しますか？",
+    "removeConfirmBody": "この投稿者の動画が再び検索結果に表示されます。",
+    "cancel": "キャンセル",
+    "confirm": "削除",
+    "blockThisUploader": "この投稿者をブロック",
+    "blockConfirmTitle": "この投稿者をブロックしますか？",
+    "blockConfirmBody": "ブロックすると、この投稿者の動画は検索結果から除外されます。",
+    "loading": "読み込み中...",
+    "block": "ブロック",
+    "manageBlacklist": "ブラックリストを管理",
+    "noResults": "結果がありません",
+    "blockedCount": "{count} 人の投稿者がブラックリストに登録されています"
   }
 }

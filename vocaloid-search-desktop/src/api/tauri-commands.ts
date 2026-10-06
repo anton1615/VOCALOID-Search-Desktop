@@ -280,6 +280,21 @@ export interface PipWindowState {
   height: number
 }
 
+export interface BlockedUploader {
+  uploader_id: string
+  display_name: string | null
+  added_at: string
+}
+
+export interface UploaderCandidate {
+  uploader_id: string
+  nickname: string
+  icon_url: string | null
+  follower_count: number | null
+  video_count: number | null
+  description: string | null
+}
+
 export const api = {
   search: async (request: SearchRequest): Promise<SearchResponse> => {
     return invoke('search', { request })
@@ -476,6 +491,23 @@ export const api = {
   
   setPlaylistType: async (playlistType: PlaylistType): Promise<void> => {
     return invoke('set_playlist_type', { playlistType })
+  },
+
+  // Uploader Blacklist API
+  searchUploaders: async (keyword: string): Promise<UploaderCandidate[]> => {
+    return invoke('search_uploaders', { keyword })
+  },
+
+  getUploaderBlacklist: async (): Promise<BlockedUploader[]> => {
+    return invoke('get_uploader_blacklist')
+  },
+
+  addUploaderToBlacklist: async (uploaderId: string, displayName?: string | null): Promise<BlockedUploader[]> => {
+    return invoke('add_uploader_to_blacklist', { uploaderId, displayName })
+  },
+
+  removeUploaderFromBlacklist: async (uploaderId: string): Promise<BlockedUploader[]> => {
+    return invoke('remove_uploader_from_blacklist', { uploaderId })
   },
 }
 

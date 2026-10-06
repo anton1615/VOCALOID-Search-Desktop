@@ -181,5 +181,27 @@
     "minutesAgo": "{count} 分鐘前",
     "hoursAgo": "{count} 小時前",
     "daysAgo": "{count} 天前"
+  },
+  "blacklist": {
+    "title": "上傳者黑名單",
+    "open": "開啟上傳者黑名單",
+    "searchPlaceholder": "搜尋上傳者名稱...",
+    "searchHint": "輸入名稱後，用 ↑↓ 選擇、Enter 加入黑名單",
+    "empty": "黑名單目前是空的",
+    "noCandidates": "找不到符合的上傳者",
+    "videoCount": "{count} 部影片",
+    "remove": "移除",
+    "removeConfirmTitle": "要解除封鎖嗎？",
+    "removeConfirmBody": "這名上傳者的影片將重新出現在搜尋結果中。",
+    "cancel": "取消",
+    "confirm": "移除",
+    "blockThisUploader": "封鎖此上傳者",
+    "blockConfirmTitle": "要封鎖這名上傳者嗎？",
+    "blockConfirmBody": "封鎖後，這名上傳者的影片會從搜尋結果中排除。",
+    "loading": "載入中...",
+    "block": "封鎖",
+    "manageBlacklist": "管理黑名單",
+    "noResults": "沒有結果",
+    "blockedCount": "共 {count} 位上傳者已在黑名單中"
   }
 }

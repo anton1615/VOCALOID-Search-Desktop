@@ -695,6 +695,25 @@ where
     deserializer.deserialize_any(UserIdVisitor)
 }
 
+/// A NicoNico uploader excluded from local Search results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlockedUploader {
+    pub uploader_id: String,
+    pub display_name: Option<String>,
+    pub added_at: String,
+}
+
+/// A NicoNico uploader search result offered by the nvapi proxy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UploaderCandidate {
+    pub uploader_id: String,
+    pub nickname: String,
+    pub icon_url: Option<String>,
+    pub follower_count: Option<i64>,
+    pub video_count: Option<i64>,
+    pub description: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

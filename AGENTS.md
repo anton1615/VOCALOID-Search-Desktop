@@ -278,6 +278,34 @@ vocaloid-search-desktop/
 - 失敗時資料庫會停在「已清空」狀態（`clear_videos` 在抓取前執行），UI 必須讓
   使用者看得出來，不可靜默當成完成。
 
+### 17. Uploader blacklist
+
+- 只作用在 SearchView 的本地查詢層（`commands.rs` 的 `blocked_uploader_clause`
+  三處 SQL 組裝點：`search`、`execute_search`、test-only `build_search_query`）。
+  不做在 sync/scraper 層：snapshot API 沒有 `userId` filter/target（實測回 400），
+  所以黑名單不減少 `videos.db` 容量與下載量，也不刪除既有資料。
+- 過濾子句必須是 `(v.uploader_id IS NULL OR v.uploader_id NOT IN (...))`：
+  `uploader_id` 可為 NULL，直接 `NOT IN` 會把這些列一起濾掉。list 與 count 共用
+  同一組 `where_clauses`，兩邊必須一致。
+- 儲存於 `user_data.db` 的 `uploader_blacklist`（`uploader_id` TEXT 主鍵、
+  `display_name` 選填、`added_at`），冪等 upsert；比對一律用字串（snapshot 的
+  `userId` 是 JSON number，經 `deserialize_user_id` 正規化）。
+- 名稱→id 只能走 nvapi 即時查詢（`/v1/search/user` 取候選、`/v1/users/{id}`
+  反查名稱；需 `X-Frontend-Id: 6`、`X-Frontend-Version: 0`、`Referer` headers）：
+  `videos.db` 刻意不存 `uploader_name`，本地無法用名稱查 id。
+- 對話框候選頭像來自 nvapi 的 `img.nicoprofile.nimg.jp`，該 host 必須列在
+  `src-tauri/tauri.conf.json` 的 `img-src`（由 `tauriCspConfig.test.ts` 守住）；
+  漏掉時 webview 會擋圖，`UploaderAvatar` 會退成官方 `defaults/blank.jpg` 預設頭像，
+  看起來就像「頭像不見了」。
+- 入口不是獨立路由頁，且唯一入口是 `App.vue` nav-footer 那顆按鈕開的全域
+  `UploaderBlacklistDialog.vue`（任何 route 都能開）：候選點選即加入（無確認框，
+  因為選取本身已是明確動作），移除才有確認框。SearchView 只在空狀態保留黑名單
+  管理入口（黑名單非空時顯示封鎖數量），卡片上的 🚫 已移除——結果列很密，在 🔗
+  連結按鈕下再掛一顆太突兀；SearchView 內的確認框流程（`pendingBlockVideo`、
+  `confirmBlockUploader`、modal markup 等）刻意保留但沒有任何 UI 入口可觸發。
+  變更由 Rust emit `uploader-blacklist-updated` 讓主視窗/PiP 同步刷新；
+  不影響正在播放的 playlist（只影響後續查詢）。
+
 ## OpenSpec 使用原則
 
 - 本 workspace 目前包含 `openspec/`；功能新增、重大修復、重構應遵循

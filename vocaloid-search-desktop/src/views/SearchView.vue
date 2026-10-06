@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
 import { api, type PlaybackVideoUpdatedPayload, type Video, type VideoSelectedPayload, formatDuration, formatNumber, getUploaderAvatarUrl } from '../api/tauri-commands'
 import UploaderAvatar from '../components/UploaderAvatar.vue'
+import { useUploaderBlacklistStore } from '../stores/uploaderBlacklist'
 import { buildSearchRequest, createSearchPersistenceState, restoreSearchPersistenceState } from '../features/playlistViews/searchViewState'
 import { resolveSearchRestoreState } from '../features/playlistViews/searchRestoreState'
 import { applyFormulaSelection, cancelFormulaSelection, selectSortOption, shouldPreloadMore, toggleSortDirection } from '../features/playlistViews/searchViewInteractions'
@@ -18,6 +19,7 @@ import {
 import { formatDateTime } from '../utils/dateTime'
 
 const { t } = useI18n()
+const blacklistStore = useUploaderBlacklistStore()
 
 const SEARCH_STATE_KEY = 'vocaloidSearchState'
 
@@ -98,6 +100,8 @@ function syncDurationInputs() {
 }
 
 const pipActive = ref(false)
+const pendingBlockVideo = ref<Video | null>(null)
+const blocking = ref(false)
 const modalMouseDownOnBackdrop = ref(false)
 const sortDropdownRef = ref<HTMLElement | null>(null)
 const listContainerRef = ref<HTMLElement | null>(null)
@@ -245,6 +249,25 @@ async function openNicoPage(event: Event, video: Video) {
   }
 }
 
+function cancelBlockUploader() {
+  pendingBlockVideo.value = null
+}
+
+async function confirmBlockUploader() {
+  const video = pendingBlockVideo.value
+  if (!video?.uploader_id) return
+
+  blocking.value = true
+  try {
+    await blacklistStore.add(video.uploader_id, video.uploader_name)
+    pendingBlockVideo.value = null
+  } catch (e) {
+    console.error('Failed to block uploader:', e)
+  } finally {
+    blocking.value = false
+  }
+}
+
 function toggleSortOrder() {
   sortOrder.value = toggleSortDirection(sortOrder.value)
   search()
@@ -379,6 +402,7 @@ let unlistenVideoSelected: (() => void) | null = null
 let unlistenPlaybackVideoUpdated: (() => void) | null = null
 let unlistenVideoWatched: (() => void) | null = null
 let unlistenWatchDataImportComplete: (() => void) | null = null
+let unlistenUploaderBlacklistUpdated: (() => void) | null = null
 
 async function syncSearchViewFromBackend() {
   const playlistState = await api.getPlaylistState()
@@ -487,6 +511,11 @@ onMounted(async () => {
   unlistenWatchDataImportComplete = await listen('watch-data-import-complete', async () => {
     await syncSearchViewFromBackend()
   })
+
+  unlistenUploaderBlacklistUpdated = await listen('uploader-blacklist-updated', () => {
+    if (loading.value || loadingMore.value) return
+    search()
+  })
 })
 
 onUnmounted(() => {
@@ -497,6 +526,7 @@ onUnmounted(() => {
   if (unlistenPlaybackVideoUpdated) unlistenPlaybackVideoUpdated()
   if (unlistenVideoWatched) unlistenVideoWatched()
   if (unlistenWatchDataImportComplete) unlistenWatchDataImportComplete()
+  if (unlistenUploaderBlacklistUpdated) unlistenUploaderBlacklistUpdated()
 })
 
 watch([
@@ -639,6 +669,16 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
           </div>
         </div>
         
+        <div v-if="!loading && results.length === 0" class="empty-state">
+          <p class="empty-message">{{ t('blacklist.noResults') }}</p>
+          <p v-if="blacklistStore.items.length > 0" class="empty-blacklist-count">
+            {{ t('blacklist.blockedCount', { count: blacklistStore.items.length }) }}
+          </p>
+          <button class="empty-blacklist-btn" @click="blacklistStore.openDialog()">
+            {{ t('blacklist.manageBlacklist') }}
+          </button>
+        </div>
+
         <div ref="observerTarget" class="scroll-trigger">
           <div v-if="loadingMore" class="spinner"></div>
           <span v-else-if="!hasNext && results.length > 0" class="end-message">{{ t('search.noResults') }}</span>
@@ -791,6 +831,33 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
         <div class="formula-actions">
           <button class="btn-secondary" @click="cancelFormula">{{ t('filter.reset') }}</button>
           <button class="btn-primary" @click="applyFormula">{{ t('filter.apply') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Block Uploader Confirm Modal（列表卡片入口已移除；流程保留，之後放到其他 UI 位置時設定 pendingBlockVideo 即可） -->
+    <div v-if="pendingBlockVideo" class="modal-backdrop" @click.self="cancelBlockUploader">
+      <div class="modal">
+        <h3>{{ t('blacklist.blockConfirmTitle') }}</h3>
+        <p>{{ t('blacklist.blockConfirmBody') }}</p>
+        <div class="block-uploader-preview">
+          <UploaderAvatar
+            :src="getUploaderAvatarUrl(pendingBlockVideo.uploader_id)"
+            :alt="pendingBlockVideo.uploader_name || pendingBlockVideo.uploader_id || 'Uploader avatar'"
+            class="uploader-avatar"
+          />
+          <div class="block-uploader-meta">
+            <strong>{{ pendingBlockVideo.uploader_name || pendingBlockVideo.uploader_id }}</strong>
+            <span class="block-uploader-id">{{ pendingBlockVideo.uploader_id }}</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary modal-btn" @click="cancelBlockUploader" :disabled="blocking">
+            {{ t('blacklist.cancel') }}
+          </button>
+          <button class="btn-primary modal-btn" @click="confirmBlockUploader" :disabled="blocking">
+            {{ t('blacklist.block') }}
+          </button>
         </div>
       </div>
     </div>
@@ -1249,6 +1316,11 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
 .nico-btn:hover {
   color: var(--color-accent-primary);
   border-color: var(--color-accent-primary);
+}
+
+.block-btn:hover {
+  color: var(--color-accent-danger);
+  border-color: var(--color-accent-danger);
 }
 
 .playing-bars {
@@ -1933,5 +2005,108 @@ watch(sortWeights, () => saveSearchState(), { deep: true })
   gap: 12px;
   padding: 16px 20px;
   border-top: 1px solid var(--color-border-subtle);
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  text-align: center;
+}
+
+.empty-message {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.empty-blacklist-count {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.empty-blacklist-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+}
+
+.empty-blacklist-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-focus);
+  color: var(--color-text-primary);
+}
+
+/* Block uploader confirm modal */
+.modal {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  padding: var(--space-xl);
+  border-radius: 8px;
+  width: min(400px, calc(100vw - 2rem));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.modal h3 {
+  margin: 0 0 0.75rem;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.modal p {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.modal-btn {
+  min-width: 110px;
+}
+
+.block-uploader-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-xl);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+}
+
+.block-uploader-preview .uploader-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.block-uploader-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.block-uploader-meta strong {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-uploader-id {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 </style>

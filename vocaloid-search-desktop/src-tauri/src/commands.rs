@@ -876,8 +876,25 @@ pub async fn load_more(
     Ok(response)
 }
 
+/// NULL-safe SQL predicate excluding blocked uploaders: videos without an
+/// `uploader_id` are kept, blocked ids are dropped. `None` when nothing is blocked.
+fn blocked_uploader_clause(blocked_ids: &[String]) -> Option<String> {
+    if blocked_ids.is_empty() {
+        return None;
+    }
+    let placeholders = blocked_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "(v.uploader_id IS NULL OR v.uploader_id NOT IN ({}))",
+        placeholders
+    ))
+}
+
 #[cfg(test)]
-fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (String, Vec<String>, String) {
+fn build_search_query(request: &SearchRequest, watched_ids: &[String], blocked_ids: &[String]) -> (String, Vec<String>, String) {
     let mut sql = String::from(
         "SELECT v.id, v.title, v.thumbnail_url, \
          v.view_count, v.comment_count, v.mylist_count, v.like_count, \
@@ -966,6 +983,13 @@ fn build_search_query(request: &SearchRequest, watched_ids: &[String]) -> (Strin
         let placeholders: Vec<String> = watched_ids.iter().map(|_| "?".to_string()).collect();
         where_clauses.push(format!("v.id NOT IN ({})", placeholders.join(", ")));
         for id in watched_ids {
+            params.push(id.clone());
+        }
+    }
+    
+    if let Some(clause) = blocked_uploader_clause(blocked_ids) {
+        where_clauses.push(clause);
+        for id in blocked_ids {
             params.push(id.clone());
         }
     }
@@ -1089,6 +1113,14 @@ fn execute_search(state: &AppState, request: &SearchRequest) -> Result<SearchRes
             for id in watched_ids {
                 params.push(Box::new(id));
             }
+        }
+    }
+    
+    let blocked_uploader_ids = state.db.get_blocked_uploader_ids().unwrap_or_default();
+    if let Some(clause) = blocked_uploader_clause(&blocked_uploader_ids) {
+        where_clauses.push(clause);
+        for id in &blocked_uploader_ids {
+            params.push(Box::new(id.clone()));
         }
     }
     
@@ -1302,6 +1334,14 @@ pub async fn search(
             for id in watched_ids {
                 params.push(Box::new(id));
             }
+        }
+    }
+    
+    let blocked_uploader_ids = state.db.get_blocked_uploader_ids().unwrap_or_default();
+    if let Some(clause) = blocked_uploader_clause(&blocked_uploader_ids) {
+        where_clauses.push(clause);
+        for id in &blocked_uploader_ids {
+            params.push(Box::new(id.clone()));
         }
     }
     
@@ -2645,6 +2685,187 @@ pub async fn reset_playback_for_sync_route_entry(
 }
 
 
+// ===== Uploader Blacklist =====
+
+const NVAPI_FRONTEND_ID: &str = "6";
+const NVAPI_FRONTEND_VERSION: &str = "0";
+const NVAPI_REFERER: &str = "https://www.nicovideo.jp/";
+
+fn nvapi_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("vocaloid-search-desktop/1.0")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+fn with_nvapi_headers(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header("X-Frontend-Id", NVAPI_FRONTEND_ID)
+        .header("X-Frontend-Version", NVAPI_FRONTEND_VERSION)
+        .header("Referer", NVAPI_REFERER)
+}
+
+/// Parse an nvapi `/v1/search/user` payload. The `id` field is a JSON number on
+/// the wire, so it is stringified here.
+fn parse_uploader_search_response(
+    payload: &serde_json::Value,
+) -> Result<Vec<UploaderCandidate>, String> {
+    let items = payload
+        .get("data")
+        .and_then(|data| data.get("items"))
+        .and_then(|items| items.as_array())
+        .ok_or_else(|| "Unexpected NicoNico uploader search response".to_string())?;
+
+    let candidates = items
+        .iter()
+        .filter_map(|item| {
+            let uploader_id = match item.get("id")? {
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::String(text) => text.clone(),
+                _ => return None,
+            };
+
+            Some(UploaderCandidate {
+                uploader_id,
+                nickname: item
+                    .get("nickname")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                icon_url: item
+                    .get("icons")
+                    .and_then(|icons| icons.get("small"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string()),
+                follower_count: item.get("followerCount").and_then(|value| value.as_i64()),
+                video_count: item.get("videoCount").and_then(|value| value.as_i64()),
+                description: item
+                    .get("description")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string()),
+            })
+        })
+        .collect();
+
+    Ok(candidates)
+}
+
+/// Best-effort nickname lookup for a known uploader id.
+async fn fetch_uploader_nickname(client: &reqwest::Client, uploader_id: &str) -> Option<String> {
+    let response = with_nvapi_headers(
+        client.get(format!("https://nvapi.nicovideo.jp/v1/users/{}", uploader_id)),
+    )
+    .send()
+    .await
+    .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: serde_json::Value = response.json().await.ok()?;
+    payload
+        .get("data")?
+        .get("user")?
+        .get("nickname")?
+        .as_str()
+        .map(|nickname| nickname.to_string())
+}
+
+#[tauri::command]
+pub async fn search_uploaders(keyword: String) -> Result<Vec<UploaderCandidate>, String> {
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let client = nvapi_client()?;
+    let response = with_nvapi_headers(
+        client
+            .get("https://nvapi.nicovideo.jp/v1/search/user")
+            .query(&[("keyword", keyword), ("_limit", "10")]),
+    )
+    .send()
+    .await
+    .map_err(|e| format!("Failed to search uploaders: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "NicoNico uploader search failed with status {}",
+            response.status()
+        ));
+    }
+
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse NicoNico uploader search response: {}", e))?;
+
+    parse_uploader_search_response(&payload)
+}
+
+#[tauri::command]
+pub async fn get_uploader_blacklist(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<BlockedUploader>, String> {
+    state.db.list_blocked_uploaders().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_uploader_to_blacklist(
+    app: AppHandle,
+    uploader_id: String,
+    display_name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<BlockedUploader>, String> {
+    let uploader_id = uploader_id.trim().to_string();
+    if uploader_id.is_empty() {
+        return Err("Uploader id must not be empty".to_string());
+    }
+
+    let provided_name = display_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+
+    let resolved_name = match provided_name {
+        Some(name) => Some(name),
+        None => {
+            // Best-effort lookup: an unreachable nvapi must not fail the add.
+            match nvapi_client() {
+                Ok(client) => fetch_uploader_nickname(&client, &uploader_id).await,
+                Err(_) => None,
+            }
+        }
+    };
+
+    state
+        .db
+        .add_blocked_uploader(&uploader_id, resolved_name.as_deref())
+        .map_err(|e| e.to_string())?;
+
+    let blacklist = state.db.list_blocked_uploaders().map_err(|e| e.to_string())?;
+    let _ = app.emit("uploader-blacklist-updated", blacklist.clone());
+    Ok(blacklist)
+}
+
+#[tauri::command]
+pub async fn remove_uploader_from_blacklist(
+    app: AppHandle,
+    uploader_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<BlockedUploader>, String> {
+    state
+        .db
+        .remove_blocked_uploader(uploader_id.trim())
+        .map_err(|e| e.to_string())?;
+
+    let blacklist = state.db.list_blocked_uploaders().map_err(|e| e.to_string())?;
+    let _ = app.emit("uploader-blacklist-updated", blacklist.clone());
+    Ok(blacklist)
+}
+
+
 // ===== Video Info Fetching =====
 
 fn parse_thumbinfo_xml(xml: &str, video_id: &str) -> Result<ThumbInfo, String> {
@@ -2708,7 +2929,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, params, count_sql) = build_search_query(&request, &[]);
+        let (sql, params, count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("SELECT v.id"));
         assert!(sql.contains("FROM videos v"));
@@ -2729,7 +2950,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("WHERE"));
         assert!(sql.contains("v.title LIKE ? ESCAPE '\\'"));
@@ -2749,7 +2970,7 @@ mod tests {
             formula_filter: None,
         };
 
-        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, params, _count_sql) = build_search_query(&request, &[], &[]);
 
         assert!(sql.contains("WHERE 1 AND NOT (("));
         assert!(sql.contains("v.title LIKE ? ESCAPE '\\'"));
@@ -2772,7 +2993,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("v.view_count >= ?"));
         assert_eq!(params.len(), 1);
@@ -2793,7 +3014,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("v.duration >= ?"));
         assert!(sql.contains("v.duration <= ?"));
@@ -2818,7 +3039,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("v.start_time >= ?"));
         assert_eq!(params.len(), 1);
@@ -2840,7 +3061,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, _params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("ORDER BY v.mylist_count ASC"));
     }
@@ -2866,7 +3087,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, _params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("ORDER BY"));
         assert!(sql.contains("v.view_count"));
@@ -2886,7 +3107,7 @@ mod tests {
         };
         
         let watched_ids = vec!["sm123".to_string(), "sm456".to_string()];
-        let (sql, params, _count_sql) = build_search_query(&request, &watched_ids);
+        let (sql, params, _count_sql) = build_search_query(&request, &watched_ids, &[]);
         
         assert!(sql.contains("v.id NOT IN"));
         assert_eq!(params.len(), 2);
@@ -2908,7 +3129,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, _params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("ORDER BY v.like_count DESC, v.id DESC"), 
             "ORDER BY should include deterministic tie-breaker: {}", sql);
@@ -2930,7 +3151,7 @@ mod tests {
             formula_filter: None,
         };
         
-        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, _params, _count_sql) = build_search_query(&request, &[], &[]);
         
         assert!(sql.contains("ORDER BY v.view_count ASC, v.id ASC"), 
             "ORDER BY should include deterministic tie-breaker with same direction: {}", sql);
@@ -2957,7 +3178,7 @@ mod tests {
             formula_filter: None,
         };
 
-        let (sql, _params, _count_sql) = build_search_query(&request, &[]);
+        let (sql, _params, _count_sql) = build_search_query(&request, &[], &[]);
 
         assert!(sql.contains("v.id DESC"),
             "ORDER BY for custom sort should include v.id DESC tie-breaker: {}", sql);
@@ -4206,5 +4427,164 @@ mod tests {
             unsupported_query_issue(&scraper_config_with_query("VOCALOID ミク")),
             None
         );
+    }
+
+    fn search_request_without_filters() -> SearchRequest {
+        SearchRequest {
+            query: String::new(),
+            page: 1,
+            page_size: 50,
+            exclude_watched: false,
+            filters: None,
+            sort: None,
+            formula_filter: None,
+        }
+    }
+
+    #[test]
+    fn build_search_query_excludes_blocked_uploaders_and_keeps_null_uploader_videos() {
+        let test = TestAppState::new();
+
+        {
+            let conn = test.state.db.connect().unwrap();
+            let insert =
+                "INSERT INTO videos (id, title, view_count, uploader_id) VALUES (?, ?, ?, ?)";
+            conn.execute(
+                insert,
+                rusqlite::params!["sm-blocked", "blocked uploader", 300i64, "811012"],
+            )
+            .unwrap();
+            conn.execute(
+                insert,
+                rusqlite::params!["sm-null", "no uploader", 200i64, Option::<String>::None],
+            )
+            .unwrap();
+            conn.execute(
+                insert,
+                rusqlite::params!["sm-kept", "kept uploader", 100i64, "999999"],
+            )
+            .unwrap();
+        }
+
+        let request = search_request_without_filters();
+        let blocked = vec!["811012".to_string()];
+        let (sql, params, count_sql) = build_search_query(&request, &[], &blocked);
+
+        assert!(
+            sql.contains("(v.uploader_id IS NULL OR v.uploader_id NOT IN (?))"),
+            "sql: {}",
+            sql
+        );
+        assert!(
+            count_sql.contains("(v.uploader_id IS NULL OR v.uploader_id NOT IN (?))"),
+            "count_sql: {}",
+            count_sql
+        );
+        assert_eq!(params, vec!["811012".to_string()]);
+
+        let conn = test.state.db.connect().unwrap();
+
+        let total: i64 = conn
+            .query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(total, 2, "blocked uploader must be excluded from the count");
+
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let ids: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert!(
+            ids.contains(&"sm-null".to_string()),
+            "videos without an uploader_id must never be dropped: {:?}",
+            ids
+        );
+        assert!(ids.contains(&"sm-kept".to_string()), "ids: {:?}", ids);
+        assert!(!ids.contains(&"sm-blocked".to_string()), "ids: {:?}", ids);
+    }
+
+    #[test]
+    fn build_search_query_leaves_query_untouched_for_an_empty_blacklist() {
+        let request = search_request_without_filters();
+        let (sql, params, count_sql) = build_search_query(&request, &[], &[]);
+
+        assert!(!sql.contains("v.uploader_id IS NULL"), "sql: {}", sql);
+        assert!(
+            !count_sql.contains("v.uploader_id IS NULL"),
+            "count_sql: {}",
+            count_sql
+        );
+        assert!(params.is_empty());
+        assert!(!sql.contains("WHERE"));
+    }
+
+    #[test]
+    fn parse_uploader_search_response_stringifies_numeric_id() {
+        let payload: serde_json::Value = serde_json::json!({
+            "meta": { "status": 200 },
+            "data": {
+                "totalCount": 2,
+                "hasNext": true,
+                "items": [
+                    {
+                        "id": 811012,
+                        "nickname": "DECO*27",
+                        "icons": { "small": "https://img.nicoprofile.nimg.jp/usericon/81/811012.jpg" },
+                        "isPremium": true,
+                        "description": "VOCALOID producer",
+                        "followerCount": 292773,
+                        "videoCount": 115,
+                        "liveCount": 142
+                    },
+                    {
+                        "id": 900001,
+                        "nickname": "No Icons"
+                    }
+                ]
+            }
+        });
+
+        let candidates = parse_uploader_search_response(&payload).unwrap();
+        assert_eq!(candidates.len(), 2);
+
+        assert_eq!(candidates[0].uploader_id, "811012");
+        assert_eq!(candidates[0].nickname, "DECO*27");
+        assert_eq!(
+            candidates[0].icon_url.as_deref(),
+            Some("https://img.nicoprofile.nimg.jp/usericon/81/811012.jpg")
+        );
+        assert_eq!(candidates[0].follower_count, Some(292773));
+        assert_eq!(candidates[0].video_count, Some(115));
+        assert_eq!(candidates[0].description.as_deref(), Some("VOCALOID producer"));
+
+        assert_eq!(candidates[1].uploader_id, "900001");
+        assert_eq!(candidates[1].nickname, "No Icons");
+        assert_eq!(candidates[1].icon_url, None);
+        assert_eq!(candidates[1].follower_count, None);
+        assert_eq!(candidates[1].video_count, None);
+        assert_eq!(candidates[1].description, None);
+    }
+
+    #[test]
+    fn parse_uploader_search_response_accepts_empty_items() {
+        let payload = serde_json::json!({
+            "meta": { "status": 200 },
+            "data": { "totalCount": 0, "hasNext": false, "items": [] }
+        });
+
+        assert_eq!(parse_uploader_search_response(&payload).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn parse_uploader_search_response_rejects_malformed_payloads() {
+        let missing_items = serde_json::json!({ "meta": { "status": 200 }, "data": {} });
+        assert!(parse_uploader_search_response(&missing_items).is_err());
+
+        let not_an_object = serde_json::json!([]);
+        assert!(parse_uploader_search_response(&not_an_object).is_err());
     }
 }

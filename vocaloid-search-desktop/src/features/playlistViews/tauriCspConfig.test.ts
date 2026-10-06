@@ -61,6 +61,7 @@ describe('tauri CSP baseline', () => {
       'https://secure-dcdn.cdn.nimg.jp',
       'https://nicovideo.cdn.nimg.jp',
       'https://image.nicovideo.jp',
+      'https://img.nicoprofile.nimg.jp',
     ]))
     expect(getDirectiveValues(directives, 'frame-src')).toEqual(expect.arrayContaining([
       "'self'",

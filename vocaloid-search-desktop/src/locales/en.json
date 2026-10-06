@@ -181,5 +181,27 @@
     "minutesAgo": "{count} min ago",
     "hoursAgo": "{count} hours ago",
     "daysAgo": "{count} days ago"
+  },
+  "blacklist": {
+    "title": "Uploader Blacklist",
+    "open": "Open uploader blacklist",
+    "searchPlaceholder": "Search uploader name...",
+    "searchHint": "Type a name, then use ↑↓ to choose and Enter to block",
+    "empty": "Your blacklist is empty",
+    "noCandidates": "No matching uploaders",
+    "videoCount": "{count} videos",
+    "remove": "Remove",
+    "removeConfirmTitle": "Unblock this uploader?",
+    "removeConfirmBody": "This uploader's videos will appear in search results again.",
+    "cancel": "Cancel",
+    "confirm": "Remove",
+    "blockThisUploader": "Block this uploader",
+    "blockConfirmTitle": "Block this uploader?",
+    "blockConfirmBody": "This uploader's videos will be excluded from search results.",
+    "loading": "Loading...",
+    "block": "Block",
+    "manageBlacklist": "Manage blacklist",
+    "noResults": "No results",
+    "blockedCount": "{count} uploaders in blacklist"
   }
 }

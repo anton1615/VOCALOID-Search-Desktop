@@ -202,6 +202,11 @@ pub fn run() {
         commands::reset_playback_for_sync_route_entry,
         // Video info fetching
         commands::fetch_full_video_info,
+        // Uploader blacklist
+        commands::search_uploaders,
+        commands::get_uploader_blacklist,
+        commands::add_uploader_to_blacklist,
+        commands::remove_uploader_from_blacklist,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
