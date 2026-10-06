@@ -1,34 +1,16 @@
 # AGENTS.md
 
-本文件提供 AI 代理的快速專案導覽。目標是讓你在進行開發修改時，
-能快速理解工作目錄、專案架構、關鍵契約與驗證方式，而不被歷史細節
-與冗長背景汙染上下文。
+本文件提供 AI 代理的快速專案導覽：讓你進行開發修改時，快速理解工作目錄、專案架構、關鍵契約與驗證方式，而不被歷史細節與冗長背景汙染上下文。
 
-若需要更完整的背景，優先看目前程式碼、測試與現行 spec；不要把這份
-文件當成歷史決策檔。
+若需要更完整的背景，優先看目前程式碼、測試與現行 spec；不要把這份文件當成歷史決策檔。
 
-## 先看這裡
+## 工作目錄與範圍
 
-- Repo root：`D:\Downloads\vocaloid-search-alt`
-- 主專案：`vocaloid-search-desktop/`
-- 所有 `npm`、`npx`、`cargo`、`tauri` 指令都在
-  `vocaloid-search-desktop/` 執行
-- root 主要放文件與專案級設定；產品程式碼在
-  `vocaloid-search-desktop/`
-
-## 工作目錄規則
-
-### Repo root
-
-- 更新 root 文件時在 repo root 操作，例如：`README.md`、`README.ja.md`、
-  `README.zh.md`、root `AGENTS.md`
-- 若工作區存在 `openspec/`，OpenSpec 指令也在 repo root 執行
-
-### App project
-
-- 日常開發、建構、測試都在 `vocaloid-search-desktop/` 執行
-- 從 `vocaloid-search-desktop/` 執行 `git status --short` 時，repo root 檔案
-  可能顯示成 `../<file>`，這是正常現象
+- Repo root：`D:\Downloads\vocaloid-search-alt`，主要放文件與專案級設定；更新 root 文件
+  （`README.md`、`README.ja.md`、`README.zh.md`、root `AGENTS.md`）時在 repo root 操作；
+  若工作區存在 `openspec/`，OpenSpec 指令也在 repo root 執行
+- 主專案：`vocaloid-search-desktop/`；所有 `npm`、`npx`、`cargo`、`tauri` 指令都在這裡執行
+- 在 `vocaloid-search-desktop/` 執行 `git status --short` 時，repo root 檔案可能顯示成 `../<file>`，這是正常現象
 
 ## 常用指令
 
@@ -54,14 +36,6 @@ cd src-tauri && cargo test accepts_search_load_more
 cd src-tauri && cargo clippy
 npm run tauri build
 npm run tauri build -- --debug
-```
-
-### 播放器 / staged metadata 相關修改優先驗證
-
-```bash
-npx vitest run src/composables/usePlayerCore.test.ts src/composables/usePlayerEvents.test.ts src/features/playlistViews/playerColumnLayout.test.ts
-npx vue-tsc --noEmit
-npm run build
 ```
 
 ## 專案結構
@@ -90,31 +64,22 @@ vocaloid-search-desktop/
 
 ### 前後端責任
 
-- 前端：Vue 3 + Vite + TypeScript，負責呈現與使用者互動
-- 後端：Rust + Tauri，負責狀態、資料存取、抓取與跨視窗同步
-- Rust 是播放與清單狀態的單一真值來源；前端不要額外維護會與 Rust 衝突
-  的狀態副本
+- 前端：Vue 3 + Vite + TypeScript，負責呈現與使用者互動；後端：Rust + Tauri，負責狀態、資料存取、抓取與跨視窗同步
+- Rust 是播放與清單狀態的單一真值來源；前端不要額外維護會與 Rust 衝突的狀態副本
 
 ### 目前最重要的狀態模型
 
-- `list_contexts`：Search / History / Watch Later 各自的瀏覽上下文
-- `active_playback`：目前播放中的清單與索引
+- `list_contexts`：Search / History / Watch Later 各自的瀏覽上下文；`active_playback`：目前播放中的清單與索引
 - browsing 與 playback 已解耦：切換可見清單不應隱式改變目前播放綁定
 
 ### 核心檔案
 
-- `vocaloid-search-desktop/src-tauri/src/state.rs`
-  - 清單上下文、版本控制、active playback
-- `vocaloid-search-desktop/src/composables/usePlayerCore.ts`
-  - 主視窗與 PiP 共用播放器核心
-- `vocaloid-search-desktop/src/composables/usePlayerEvents.ts`
-  - 播放器事件與同步處理
-- `vocaloid-search-desktop/src/views/SearchView.vue`
-  - 搜尋頁主要 UI
-- `vocaloid-search-desktop/src/views/HistoryView.vue`
-- `vocaloid-search-desktop/src/views/WatchLaterView.vue`
-- `vocaloid-search-desktop/src/views/ScraperView.vue`
-  - Scraper sync 與 watch-data import UI
+- `src-tauri/src/state.rs` → 清單上下文、版本控制、active playback
+- `src/composables/usePlayerCore.ts` → 主視窗與 PiP 共用播放器核心
+- `src/composables/usePlayerEvents.ts` → 播放器事件與同步處理
+- `src/views/SearchView.vue` → 搜尋頁主要 UI
+- `src/views/HistoryView.vue` / `WatchLaterView.vue` → History / Watch Later 頁
+- `src/views/ScraperView.vue` → Scraper sync 與 watch-data import UI
 
 ## 程式碼風格
 
@@ -131,6 +96,7 @@ vocaloid-search-desktop/
 - Rust 測試放在 `#[cfg(test)] mod tests { ... }`
 - 修改後至少跑與變更直接相關的測試；若影響播放器、同步或 state contract，
   要擴大驗證範圍
+- 播放器 / staged metadata 改動要加跑 `usePlayerCore.test.ts`、`usePlayerEvents.test.ts`、`playerColumnLayout.test.ts`，外加 `vue-tsc --noEmit` 與 `npm run build`。
 
 ## 修改時必記契約
 
@@ -155,49 +121,37 @@ vocaloid-search-desktop/
 ### 4. Search playback snapshot / watched boundary
 
 - Search 播放啟動後，Rust 端會把當前 Search session 綁定到 playback snapshot
-- active Search playback session 的 watched exclusion boundary 必須保持 frozen；
-  不可因新 watched 狀態讓既有分頁 membership 在同一播放 session 中漂移
-- Search `load more`、連續播放、PiP / 主視窗同步都要以同一個 active Search
-  playback snapshot 為準，而不是各自讀取當下最新的 live browsing state
+- active Search playback session 的 watched exclusion boundary 必須保持 frozen；不可因新 watched 狀態讓既有分頁 membership 在同一播放 session 中漂移
+- Search `load more`、連續播放、PiP / 主視窗同步都要以同一個 active Search playback snapshot 為準，而不是各自讀取當下最新的 live browsing state
 
 ### 5. staged metadata / player update
 
-- Search / History / Watch Later 的播放區要先顯示嵌入播放器，再等待 Rust
-  enrichment 後更新 metadata
+- Search / History / Watch Later 的播放區要先顯示嵌入播放器，再等待 Rust enrichment 後更新 metadata
 - 不要在前端先用 `uploader_id` 之類的暫時值當過渡 UI
-- `playback-video-updated` 是獨立於 `video-selected` 的 metadata refresh；
-  只有 playlist type、version、index、video id 全匹配時才應套用
+- `playback-video-updated` 是獨立於 `video-selected` 的 metadata refresh；只有 playlist type、version、index、video id 全匹配時才應套用
 
 ### 6. Search restore 與 route reset
 
 - Search restore 不可只因 `results.length === 0` 就視為需要重做 initial search
-- persisted empty-result、query、sort、filters、pagination 都可能是有效的
-  browsing state
-- 進入 `/scraper` 時需要做 playback reset，但不能順手清掉
-  Search / History / Watch Later 的 browsing state
+- persisted empty-result、query、sort、filters、pagination 都可能是有效的 browsing state
+- 進入 `/scraper` 時需要做 playback reset，但不能順手清掉 Search / History / Watch Later 的 browsing state
 
 ### 7. Metadata panel 與 PiP 佈局
 
-- `VideoMetaPanel` 的 description toggle 以實際 rendered overflow 決定，
-  不能靠固定字數門檻
-- 量測要在 mount / video 變更後重新執行；寬度變化用 `ResizeObserver`
-  維持主視窗與 PiP 一致
-- PiP compact header 問題先分辨責任層：`VideoMetaPanel`、`UnifiedPlayer`
-  shell、或 PiP section stack，不要盲改樣式
+- `VideoMetaPanel` 的 description toggle 以實際 rendered overflow 決定，不能靠固定字數門檻
+- 量測要在 mount / video 變更後重新執行；寬度變化用 `ResizeObserver` 維持主視窗與 PiP 一致
+- PiP compact header 問題先分辨責任層：`VideoMetaPanel`、`UnifiedPlayer` shell、或 PiP section stack，不要盲改樣式
 
 ### 8. Watch Later remove confirm
 
 - 只有 `WatchLaterView` 列表卡右側 `✕` 需要確認框
 - `WatchLaterButton` 的 heart toggle 在主視窗與 PiP 仍維持即時 add/remove
-- 確認框按鈕樣式要在 `WatchLaterView` 內有明確 class，不要依賴不存在的
-  通用按鈕 class
+- 確認框按鈕樣式要在 `WatchLaterView` 內有明確 class，不要依賴不存在的通用按鈕 class
 
 ### 9. Single-video metadata source
 
-- Search 播放時，shared fields 以 `videos.db` 為主，只額外補 `description`
-  與 `uploader_name`
-- History / Watch Later 播放時，共用 metadata 由 watch JSON 提供；成功 enrichment
-  必須從 `video_id` 衍生 canonical `watch_url`，供共享 `VideoMetaPanel` 顯示網址複製列
+- Search 播放時，shared fields 以 `videos.db` 為主，只額外補 `description` 與 `uploader_name`
+- History / Watch Later 播放時，共用 metadata 由 watch JSON 提供；成功 enrichment 必須從 `video_id` 衍生 canonical `watch_url`，供共享 `VideoMetaPanel` 顯示網址複製列
 - enrichment 失敗時保留 placeholder；不可為缺少的 metadata 偽造 `watch_url`
 - upload date 不可 fallback 成 watched / added timestamp
 
@@ -216,56 +170,37 @@ vocaloid-search-desktop/
 - merge key 是 `video_id`；History merge 後要依 `first_watched_at`、`watched_at`、`video_id` 重算 `first_watched_seq`
 - preview 與 execute 必須綁定同一份檔案內容；檔案內容或 confirmed summary 不一致時要拒絕執行
 - 匯入完成後要先做 Rust authoritative state refresh，再發 `watch-data-import-complete`；主視窗、PiP、已掛載 list views 都要從 Rust 真值重新同步
-- scraper sync 完成後要重新讀 Rust stats 並刷新 `check_database_freshness` 注入狀態；
-  `/scraper` 是獨立 route，內容區需保留自己的垂直捲動，避免進度區被 main layout 截掉
+- scraper sync 完成後要重新讀 Rust stats 並刷新 `check_database_freshness` 注入狀態；`/scraper` 是獨立 route，內容區需保留自己的垂直捲動，避免進度區被 main layout 截掉
 
 ### 12. Title entity normalization
 
 - Snapshot 與 Watch API 的 title 在 Rust ingress 邊界只解碼 HTML entities 一次
-- 啟動時以有持久 migration marker 的 transaction 正規化既有 `videos.title`、
-  `history.title`、`watch_later.title`；不可每次啟動重複解碼 `&amp;amp;`
+- 啟動時以有持久 migration marker 的 transaction 正規化既有 `videos.title`、`history.title`、`watch_later.title`；不可每次啟動重複解碼 `&amp;amp;`
 - 標題一律以 Vue text interpolation 顯示，不用 `v-html`
 
 ### 13. Embedded player readiness
 
 - iframe message listener 必須在初始 iframe render 前安裝；unmount 時移除
-- `playerReady` / `isPlaying` 屬於當前 iframe session；相同 authoritative identity
-  的重複 props/event 同步不可重設狀態
-- 只有 playback identity/session 改變或 playback 清除時才重設 readiness；跨 list
-  同 id 仍是新 session，主視窗與 PiP 共用此契約
+- `playerReady` / `isPlaying` 屬於當前 iframe session；相同 authoritative identity 的重複 props/event 同步不可重設狀態
+- 只有 playback identity/session 改變或 playback 清除時才重設 readiness；跨 list 同 id 仍是新 session，主視窗與 PiP 共用此契約
 
 ### 14. Search text syntax（三個 view 與同步一致）
 
-- Search / History / Watch Later 的搜尋框共用同一套語法，實作在
-  `src-tauri/src/search_query.rs`：空白 = AND、`OR`（前後需空白）、`"..."` =
-  片語、`-詞` = 排除（`-` 與詞之間不可有空白；`- 詞` 視為字面）、`*` = 全部
-  （僅本地三個清單搜尋；`*` 只能是獨立 token，`"*"` 仍為字面）。
-- 只有負向詞的查詢不匹配任何列（與 snapshot API 行為一致：對這種查詢回傳 0
-  筆），渲染成 `0`；不可當成「排除該詞後全選」。
-- `snapshot_query_issue` 守住同步路徑：snapshot API 沒有萬用字元、對「僅排除
-  詞」的查詢也回 0 筆，因此使用 `*` 或只有排除詞的 sync 必須在清空 `videos.db`
-  前被拒絕（`run_scraper` 回傳英文 issue message；preflight 以
-  `unsupported_query_issue` 回 `wildcard` / `only_excluded`）。
-- 詞比對使用 `LIKE ... ESCAPE '\'`，`%`/`_`/`\` 由 `like_pattern` 轉義；videos
-  比對 `title` 與 `tags`，History / Watch Later 只比對 `title`。
-- History / Watch Later 的 `get_history` / `get_watch_later` 必須同時過濾
-  count（`get_history_count` / `get_watch_later_count`），否則 `total` /
-  `has_next` 會與實際結果不一致。
-- 搜尋**不經過 FTS**：`video_fts` 表與其 trigger 已從 schema 移除，既有資料庫會在
-  `init_db` 的 `drop_legacy_video_fts` 中被清掉；不要再把 FTS 加回來（README 也
-  不應宣稱 FTS5）。
+- Search / History / Watch Later 共用同一套語法，實作在 `src-tauri/src/search_query.rs`：
+  空白 = AND、`OR` 前後需空白、`"..."` = 片語、`-詞` = 排除（`-` 與詞之間不可有空白，
+  `- 詞` 為字面）、`*` = 全部（只限本地三個清單；只能是獨立 token，`"*"` 仍為字面）
+- 只有負向詞的查詢匹配 0 筆（與 snapshot API 一致，顯示為 `0`），不可當成「排除該詞後全選」
+- `snapshot_query_issue` 守住同步路徑：使用 `*` 或只有排除詞的 sync 必須在清空 `videos.db` 前被拒絕（回 `wildcard` / `only_excluded`）
+- 詞比對用 `LIKE ... ESCAPE '\'`，`%`/`_`/`\` 由 `like_pattern` 轉義；videos 比對 `title` 與 `tags`，History / Watch Later 只比對 `title`
+- History / Watch Later 的 `get_history` / `get_watch_later` 必須同時過濾 count（`get_history_count` / `get_watch_later_count`），否則 `total` / `has_next` 不一致
+- 不要加回 FTS：`video_fts` 表與 trigger 已從 schema 移除，既有資料庫由 `init_db` 的 `drop_legacy_video_fts` 清掉（README 也不應宣稱 FTS5）
 
 ### 15. videos.db storage / auto_vacuum
 
-- `videos.db` 使用 `auto_vacuum=FULL`（`init_db` → `ensure_cache_auto_vacuum`），
-  讓同步把範圍縮小後檔案跟著截斷，不停在歷史高水位。
-- 既有 DB 需要一次性 `VACUUM` 轉換；該次會先檢查可用空間（不足就跳過，下次啟動
-  再試），失敗是安全的。轉換是唯一的暫存尖峰：FULL 的縮檔是就地搬頁，不需要暫存
-  檔，同步期間不會出現 2 倍峰值。
-- `user_data.db` 維持預設（沒有大量刪除，開啟只是多餘負擔）。
-- 同步大小預估（`scraper_preflight::estimate_database_size_kb`）以
-  `(page_count − freelist_count) × page_size ÷ rows` 為基準，再取
-  `max(需要量, 目前檔案大小)`；FTS 移除與 VACUUM 的結果都會自動反映。
+- `videos.db` 使用 `auto_vacuum=FULL`（`init_db` → `ensure_cache_auto_vacuum`）是有意的：同步縮小範圍後檔案跟著截斷，不停在歷史高水位
+- 既有 DB 需要一次性 `VACUUM` 轉換；該次會先檢查可用空間，不足就跳過（下次啟動再試），失敗是安全的；FULL 的縮檔是就地搬頁，不需要暫存檔，同步期間不會出現 2 倍峰值
+- `user_data.db` 維持預設（沒有大量刪除，開啟只是多餘負擔）
+- 同步大小預估（`scraper_preflight::estimate_database_size_kb`）以 `(page_count − freelist_count) × page_size ÷ rows` 為基準，再取 `max(需要量, 目前檔案大小)`；FTS 移除與 VACUUM 的結果都會自動反映
 
 ### 16. 同步失敗回報與工作列進度
 
@@ -273,50 +208,31 @@ vocaloid-search-desktop/
   `scraper.rs` 的 `SnapshotRequestError` → `run_scraper` 把 `progress.status` 設為
   `error: <訊息>`，`ScraperView` 顯示 `syncFailedTitle` 警告。
 - 例外：offset 已達上限時的 `400` 視為正常換窗結束，不算失敗。
-- `run_scraper` 同步更新工作列進度：`Indeterminate` → 取得 `totalCount` 後
-  `Normal` + 百分比 → 任何結束（完成／取消／失敗）都清除。
-- 失敗時資料庫會停在「已清空」狀態（`clear_videos` 在抓取前執行），UI 必須讓
-  使用者看得出來，不可靜默當成完成。
+- `run_scraper` 同步更新工作列進度：`Indeterminate` → 取得 `totalCount` 後 `Normal` + 百分比 → 任何結束（完成／取消／失敗）都清除。
+- 失敗時資料庫會停在「已清空」狀態（`clear_videos` 在抓取前執行），UI 必須讓使用者看得出來，不可靜默當成完成。
 
 ### 17. Uploader blacklist
 
-- 只作用在 SearchView 的本地查詢層（`commands.rs` 的 `blocked_uploader_clause`
-  三處 SQL 組裝點：`search`、`execute_search`、test-only `build_search_query`）。
-  不做在 sync/scraper 層：snapshot API 沒有 `userId` filter/target（實測回 400），
-  所以黑名單不減少 `videos.db` 容量與下載量，也不刪除既有資料。
-- 過濾子句必須是 `(v.uploader_id IS NULL OR v.uploader_id NOT IN (...))`：
-  `uploader_id` 可為 NULL，直接 `NOT IN` 會把這些列一起濾掉。list 與 count 共用
-  同一組 `where_clauses`，兩邊必須一致。
-- 儲存於 `user_data.db` 的 `uploader_blacklist`（`uploader_id` TEXT 主鍵、
-  `display_name` 選填、`added_at`），冪等 upsert；比對一律用字串（snapshot 的
-  `userId` 是 JSON number，經 `deserialize_user_id` 正規化）。
-- 名稱→id 只能走 nvapi 即時查詢（`/v1/search/user` 取候選、`/v1/users/{id}`
-  反查名稱；需 `X-Frontend-Id: 6`、`X-Frontend-Version: 0`、`Referer` headers）：
-  `videos.db` 刻意不存 `uploader_name`，本地無法用名稱查 id。
-- 對話框候選頭像來自 nvapi 的 `img.nicoprofile.nimg.jp`，該 host 必須列在
-  `src-tauri/tauri.conf.json` 的 `img-src`（由 `tauriCspConfig.test.ts` 守住）；
-  漏掉時 webview 會擋圖，`UploaderAvatar` 會退成官方 `defaults/blank.jpg` 預設頭像，
-  看起來就像「頭像不見了」。
-- 入口不是獨立路由頁，且唯一入口是 `App.vue` nav-footer 那顆按鈕開的全域
-  `UploaderBlacklistDialog.vue`（任何 route 都能開）：候選點選即加入（無確認框，
-  因為選取本身已是明確動作），移除才有確認框。SearchView 只在空狀態保留黑名單
-  管理入口（黑名單非空時顯示封鎖數量），卡片上的 🚫 已移除——結果列很密，在 🔗
-  連結按鈕下再掛一顆太突兀；SearchView 內的確認框流程（`pendingBlockVideo`、
-  `confirmBlockUploader`、modal markup 等）刻意保留但沒有任何 UI 入口可觸發。
-  變更由 Rust emit `uploader-blacklist-updated` 讓主視窗/PiP 同步刷新；
-  不影響正在播放的 playlist（只影響後續查詢）。
+- 只在 SearchView 的本地查詢層過濾（`commands.rs` 的 `blocked_uploader_clause`，三處 SQL 組裝點：
+  `search`、`execute_search`、test-only `build_search_query`）；不做在 sync/scraper 層
+  （snapshot API 沒有 `userId` filter/target），也不減少 `videos.db` 容量與下載量、不刪除既有資料
+- 過濾子句必須是 `(v.uploader_id IS NULL OR v.uploader_id NOT IN (...))`（`uploader_id` 可為 NULL）；list 與 count 共用同一組 `where_clauses`
+- 黑名單存 `user_data.db` 的 `uploader_blacklist`（`uploader_id` TEXT 主鍵、`display_name` 選填、`added_at`），冪等 upsert；比對一律用字串（snapshot 的 `userId` 是 JSON number，經 `deserialize_user_id` 正規化）
+- 名稱→id 只能走 nvapi（`/v1/search/user`、`/v1/users/{id}`，需 `X-Frontend-Id: 6`、`X-Frontend-Version: 0`、`Referer`），因為 `videos.db` 刻意不存 `uploader_name`
+- 候選頭像的 `img.nicoprofile.nimg.jp` 必須列在 `src-tauri/tauri.conf.json` 的 `img-src`（`tauriCspConfig.test.ts` 守住），否則 webview 擋圖，`UploaderAvatar` 會退成 `defaults/blank.jpg` 預設頭像
+- 唯一入口是 `App.vue` nav-footer 按鈕開的全域 `UploaderBlacklistDialog.vue`（任何 route 都能開；
+  候選點選即加入、移除才需確認框）；SearchView 只保留空狀態入口（黑名單非空時顯示封鎖數量），
+  卡片 🚫 已移除，SearchView 內的確認框流程（`pendingBlockVideo`、`confirmBlockUploader`、
+  modal markup）刻意保留但沒有 UI 入口可觸發。變更由 Rust emit `uploader-blacklist-updated` 同步；
+  不影響正在播放的 playlist（只影響後續查詢）
 
 ## OpenSpec 使用原則
 
-- 本 workspace 目前包含 `openspec/`；功能新增、重大修復、重構應遵循
-  OpenSpec 流程
-- 先看 `openspec/specs/` 的現行規格，再看 `openspec/changes/` 與
-  `openspec/changes/archive/` 理解脈絡
+- 本 workspace 目前包含 `openspec/`；功能新增、重大修復、重構應遵循 OpenSpec 流程
+- 先看 `openspec/specs/` 的現行規格，再看 `openspec/changes/` 與 `openspec/changes/archive/` 理解脈絡
 - archive 是歷史快照，不要把 archive 內容直接當成現行規格
-- spec / 程式碼 / archive 不一致時，以現行 spec 與實際程式碼為主，必要時再
-  同步文件
-- 若未來某個 checkout 沒有 `openspec/`，再退回以現行程式碼、測試與 repo
-  文件為準
+- spec / 程式碼 / archive 不一致時，以現行 spec 與實際程式碼為主，必要時再同步文件
+- 若未來某個 checkout 沒有 `openspec/`，再退回以現行程式碼、測試與 repo 文件為準
 
 ### 目前最常先看的能力規格
 
@@ -328,10 +244,9 @@ vocaloid-search-desktop/
 ## 文件維護原則
 
 - 這份 `AGENTS.md` 只保留高價值、會直接影響日常修改判斷的資訊
-- 詳細歷史背景、長篇決策說明、一次性除錯筆記，應放在 spec、設計文件、
-  測試或其他專用文件，不要持續堆回這裡
-- 若專案架構或契約明顯改變，修改功能後應順手更新這份文件，保持它是
-  「快速導覽」而不是「歷史百科」
+- 詳細歷史背景、長篇決策說明、一次性除錯筆記，應放在 spec、設計文件、測試或其他專用文件，不要持續堆回這裡
+- 若專案架構或契約明顯改變，修改功能後應順手更新這份文件，保持它是「快速導覽」而不是「歷史百科」
+- 每個 `### <n>.` 契約硬上限 15 行；超出時先壓成 invariant，長篇背景放 `openspec/specs/<capability>/spec.md`（注意 `openspec/` 目前被 `.gitignore` 忽略、不進版控）
 
 ## 相關文件
 

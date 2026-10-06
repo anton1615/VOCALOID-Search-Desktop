@@ -98,6 +98,7 @@ VOCALOID Search Desktop is designed for people who want a **native local app** i
 - 📜 **Watch History**: Track what you have watched and jump back into playback
 - ⏰ **Watch Later**: Save videos for future playback in a dedicated list
 - 🙈 **Exclude Watched**: Filter watched videos out of search results
+- 🚫 **Uploader Blacklist**: Hide specific uploaders from local search results via a sidebar dialog with name autocomplete
 - 💾 **Window State Persistence**: Restore window size, position, and maximize state between sessions
 - 🗃️ **Local Database**: Scrape and store video metadata locally for fast search
 - 🧮 **Custom Formula Sorting & Filtering**: Weight views, likes, mylists, and comments using your own formula
