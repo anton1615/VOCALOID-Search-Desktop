@@ -116,7 +116,10 @@ vocaloid-search-desktop/
 
 - `ListContext.version` 用來防止並發請求混入不同查詢結果
 - Search 與 load more 相關改動要特別注意 `state.rs` 中的 version 契約
-- 更新 search 參數時要維持原子性，避免 load more 讀到舊參數
+- `load_more` 不改 version，所以 version 檢查擋不住 load-more 之間的併發；
+  `extend_list_context_items` 必須在寫鎖下重驗 `expected_page`，頁已被前進就拒絕 append
+  （否則主視窗 SearchView 預載與 PiP `playNext` 預載會雙重 append 同一頁，
+  播放清單出現重複項目，如「第 101 首 = 第 51 首」）
 
 ### 4. Search playback snapshot / watched boundary
 

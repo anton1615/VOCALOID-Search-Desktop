@@ -13,6 +13,7 @@ const resultsCount = ref(0)
 const hasNext = ref(false)
 const playlistType = ref<PlaylistType>('Search')
 const playlistVersion = ref(1)
+const loadMoreInFlight = ref(false)
 
 const pipWindow = getCurrentWindow()
 let isClosing = false
@@ -65,9 +66,18 @@ async function playNext() {
         if (searchState.loading) {
           console.log('[PiP] Blocked preload: search in progress')
         } else if (searchState.has_next) {
-          console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
-          await api.loadMore('Search', searchState.version)
-          await refreshActivePlayback()
+          if (loadMoreInFlight.value) {
+            console.log('[PiP] Blocked preload: loadMore already in flight')
+          } else {
+            loadMoreInFlight.value = true
+            try {
+              console.log('[PiP] Preloading more results... (remaining:', remaining, ')')
+              await api.loadMore('Search', searchState.version)
+              await refreshActivePlayback()
+            } finally {
+              loadMoreInFlight.value = false
+            }
+          }
         }
       } catch (e) {
         console.error('[PiP] Preload failed:', e)
@@ -78,9 +88,18 @@ async function playNext() {
         if (searchState.loading) {
           console.log('[PiP] Blocked loadMore: search in progress')
         } else if (searchState.has_next) {
-          console.log('[PiP] At end, loading more...')
-          await api.loadMore('Search', searchState.version)
-          await refreshActivePlayback()
+          if (loadMoreInFlight.value) {
+            console.log('[PiP] Blocked loadMore: already in flight')
+          } else {
+            loadMoreInFlight.value = true
+            try {
+              console.log('[PiP] At end, loading more...')
+              await api.loadMore('Search', searchState.version)
+              await refreshActivePlayback()
+            } finally {
+              loadMoreInFlight.value = false
+            }
+          }
         }
       } catch (e) {
         console.error('[PiP] loadMore failed:', e)

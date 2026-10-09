@@ -271,24 +271,26 @@ impl AppState {
     }
 
     /// Extend list context items after load_more
-    /// This appends new items and updates pagination state, validating version
-    /// Returns true if successful, false if version mismatch
+    /// This appends new items and updates pagination state, validating both
+    /// the version and the page the caller based its fetch on
+    /// Returns true if successful, false if version OR page mismatch
     pub fn extend_list_context_items(
         &self,
         list_id: &ListContextId,
         expected_version: u64,
         new_items: Vec<Video>,
-        page: usize,
+        expected_page: usize,
         has_next: bool,
     ) -> bool {
         let mut contexts = self.list_contexts.write();
         if let Some(context) = contexts.get_mut(list_id) {
-            // Verify version hasn't changed
-            if context.version != expected_version {
+            // Verify version hasn't changed and no concurrent load-more
+            // already advanced the page
+            if context.version != expected_version || context.page != expected_page {
                 return false;
             }
             context.items.extend(new_items);
-            context.page = page;
+            context.page = expected_page + 1;
             context.has_next = has_next;
             return true;
         }
@@ -1360,6 +1362,68 @@ mod tests {
         assert_eq!(active.current_index, 0);
         assert!(test.state.search_playback_snapshot.read().is_none());
         assert!(test.state.get_list_context_items(&ListContextId::Search)[0].is_watched);
+    }
+
+    #[test]
+    fn extend_list_context_items_rejects_concurrent_same_page_append() {
+        let test = TestAppState::new();
+
+        test.state.update_list_context(
+            ListContextId::Search,
+            vec![sample_video("sm1"), sample_video("sm9")],
+            1,
+            50,
+            true,
+            2,
+            "miku".to_string(),
+            None,
+            None,
+            false,
+            None,
+        );
+        let version = test.state.get_list_context_version(&ListContextId::Search);
+
+        // First load-more based on page 1 succeeds
+        let first_page = vec![sample_video("sm51"), sample_video("sm52")];
+        let first = test.state.extend_list_context_items(
+            &ListContextId::Search,
+            version,
+            first_page.clone(),
+            1,
+            true,
+        );
+        assert!(first);
+        let context = test.state.get_list_context(&ListContextId::Search).unwrap();
+        assert_eq!(context.page, 2);
+        assert_eq!(context.items.len(), 4);
+
+        // Racing duplicate request that read the same base page must be
+        // rejected without appending or changing pagination state
+        let second = test.state.extend_list_context_items(
+            &ListContextId::Search,
+            version,
+            first_page,
+            1,
+            true,
+        );
+        assert!(!second);
+        let context = test.state.get_list_context(&ListContextId::Search).unwrap();
+        assert_eq!(context.items.len(), 4);
+        assert_eq!(context.page, 2);
+
+        // A legitimate sequential continue from the new page succeeds
+        let third = test.state.extend_list_context_items(
+            &ListContextId::Search,
+            version,
+            vec![sample_video("sm101"), sample_video("sm102")],
+            2,
+            false,
+        );
+        assert!(third);
+        let context = test.state.get_list_context(&ListContextId::Search).unwrap();
+        assert_eq!(context.page, 3);
+        assert_eq!(context.items.len(), 6);
+        assert!(!context.has_next);
     }
     fn sample_video(id: &str) -> Video {
         Video {

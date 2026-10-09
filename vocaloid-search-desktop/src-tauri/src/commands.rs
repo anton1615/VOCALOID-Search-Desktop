@@ -837,8 +837,10 @@ pub async fn load_more(
         return Err("No more results to load".to_string());
     }
     
-    // Calculate next page
-    let next_page = context.page + 1;
+    // Capture the base page this request was built on; extend_list_context_items
+    // rejects the append if a concurrent load-more already advanced it
+    let base_page = context.page;
+    let next_page = base_page + 1;
     
     // Construct SearchRequest from list_context browsing state
     let request = SearchRequest {
@@ -856,9 +858,9 @@ pub async fn load_more(
     let response = execute_search(&state, &request)?;
     
     // Append new items to list_context and update pagination state
-    let extend_success = state.extend_list_context_items(&list_id, current_version, response.results.clone(), next_page, response.has_next);
+    let extend_success = state.extend_list_context_items(&list_id, current_version, response.results.clone(), base_page, response.has_next);
     if !extend_success {
-        return Err("Failed to extend list context: version mismatch or context not found".to_string());
+        return Err("Concurrent load-more already advanced the page".to_string());
     }
     // Also sync search_state with list_context for restore compatibility
     {
