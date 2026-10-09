@@ -200,7 +200,9 @@ vocaloid-search-desktop/
 - `videos.db` 使用 `auto_vacuum=FULL`（`init_db` → `ensure_cache_auto_vacuum`）是有意的：同步縮小範圍後檔案跟著截斷，不停在歷史高水位
 - 既有 DB 需要一次性 `VACUUM` 轉換；該次會先檢查可用空間，不足就跳過（下次啟動再試），失敗是安全的；FULL 的縮檔是就地搬頁，不需要暫存檔，同步期間不會出現 2 倍峰值
 - `user_data.db` 維持預設（沒有大量刪除，開啟只是多餘負擔）
-- 同步大小預估（`scraper_preflight::estimate_database_size_kb`）以 `(page_count − freelist_count) × page_size ÷ rows` 為基準，再取 `max(需要量, 目前檔案大小)`；FTS 移除與 VACUUM 的結果都會自動反映
+- 同步大小預估（`scraper_preflight::estimate_database_size_kb`）= 預估影片數 ×
+  live bytes per row（`(page_count − freelist_count) × page_size ÷ rows`），不取
+  `max(, 目前檔案大小)`：FULL 截斷保證同步後大小與舊檔大小無關；FTS 移除與 VACUUM 的結果都會自動反映
 
 ### 16. 同步失敗回報與工作列進度
 

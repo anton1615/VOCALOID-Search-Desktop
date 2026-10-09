@@ -28,22 +28,16 @@ const CATEGORY_TO_GENRE: &[(&str, &str)] = &[
 
 pub fn estimate_database_size_kb(
     estimated_video_count: Option<usize>,
-    current_file_size_kb: Option<u64>,
     live_bytes_per_row: Option<f64>,
 ) -> Option<u64> {
     let count = estimated_video_count? as u64;
 
+    // videos.db uses auto_vacuum=FULL: the sync's DELETE + INSERT commits
+    // truncate the file to the live data, so the post-sync size is just the
+    // estimated rows at the current live bytes-per-row, regardless of how
+    // large the file was before the sync.
     let bytes_per_row = live_bytes_per_row.unwrap_or(FALLBACK_BYTES_PER_VIDEO);
-    let required_kb = (count as f64 * bytes_per_row / 1024.0).ceil() as u64;
-
-    // SQLite never shrinks a database file in place: auto_vacuum is off and the
-    // sync replaces rows with DELETE + INSERT, which recycles freed pages but
-    // keeps the file at its high-water mark. The synced file therefore cannot be
-    // smaller than what is already on disk.
-    Some(match current_file_size_kb {
-        Some(current) => required_kb.max(current),
-        None => required_kb,
-    })
+    Some((count as f64 * bytes_per_row / 1024.0).ceil() as u64)
 }
 
 fn build_estimate_query_params(config: &ScraperConfig) -> Vec<(String, String)> {
@@ -117,28 +111,28 @@ mod tests {
 
     #[test]
     fn scales_from_live_bytes_per_row() {
-        let estimated = estimate_database_size_kb(Some(200_000), Some(4_000), Some(1024.0));
+        let estimated = estimate_database_size_kb(Some(200_000), Some(1024.0));
 
         assert_eq!(estimated, Some(200_000));
     }
 
     #[test]
-    fn never_reports_less_than_the_current_file_size() {
-        let estimated = estimate_database_size_kb(Some(10), Some(50_000), Some(1024.0));
+    fn ignores_a_larger_pre_sync_file_because_auto_vacuum_truncates_it() {
+        let estimated = estimate_database_size_kb(Some(10), Some(1024.0));
 
-        assert_eq!(estimated, Some(50_000));
+        assert_eq!(estimated, Some(10));
     }
 
     #[test]
     fn falls_back_to_default_bytes_per_row_when_database_is_empty() {
-        let estimated = estimate_database_size_kb(Some(10), None, None);
+        let estimated = estimate_database_size_kb(Some(10), None);
 
         assert_eq!(estimated, Some(10));
     }
 
     #[test]
     fn returns_none_when_video_count_estimate_is_unavailable() {
-        let estimated = estimate_database_size_kb(None, Some(4_000), Some(1024.0));
+        let estimated = estimate_database_size_kb(None, Some(1024.0));
 
         assert_eq!(estimated, None);
     }

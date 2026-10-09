@@ -2354,7 +2354,7 @@ pub async fn get_sync_preflight_estimate(
 ) -> Result<SyncPreflightEstimate, String> {
     let config = state.config.read().clone();
 
-    use crate::database::{get_data_dir, get_db_path};
+    use crate::database::get_data_dir;
     let data_dir = get_data_dir(&app);
     let free_space_kb = crate::scraper_preflight::lookup_free_space_kb(&data_dir);
 
@@ -2368,16 +2368,10 @@ pub async fn get_sync_preflight_estimate(
     }
 
     let estimated_video_count = crate::scraper_preflight::estimate_video_count(&config).await;
-
-    let db_path = get_db_path(&app);
-    let current_database_size_kb = std::fs::metadata(db_path)
-        .ok()
-        .map(|metadata| metadata.len() / 1024);
     let live_bytes_per_row = state.db.live_bytes_per_row().ok().flatten();
 
     let estimated_database_size_kb = crate::scraper_preflight::estimate_database_size_kb(
         estimated_video_count,
-        current_database_size_kb,
         live_bytes_per_row,
     );
 
