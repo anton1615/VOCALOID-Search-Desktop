@@ -371,7 +371,7 @@ struct WatchApiMetadata {
 }
 
 fn extract_watch_api_metadata(payload: &serde_json::Value) -> Option<WatchApiMetadata> {
-    let response = payload.get("data")?.get("response")?;
+    let response = payload.get("data")?;
     let video = response.get("video")?;
     let count = video.get("count");
     let owner = response.get("owner");
@@ -438,9 +438,26 @@ fn apply_single_video_metadata(list_id: ListContextId, placeholder: Video, metad
 }
 
 async fn fetch_watch_api_payload(client: &reqwest::Client, video_id: &str) -> Option<serde_json::Value> {
-    let url = format!("https://www.nicovideo.jp/watch/{}?responseType=json", video_id);
+    // legacy ?responseType=json now returns 400; v3_guest requires frontend headers and a track id
+    let track_id = format!(
+        "AAAAAAAAAA_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    let url = format!(
+        "https://www.nicovideo.jp/api/watch/v3_guest/{}?actionTrackId={}",
+        video_id, track_id
+    );
 
-    let response = client.get(&url).send().await.ok()?;
+    let response = client
+        .get(&url)
+        .header("X-Frontend-Id", "6")
+        .header("X-Frontend-Version", "0")
+        .send()
+        .await
+        .ok()?;
     response.json::<serde_json::Value>().await.ok()
 }
 
@@ -3948,28 +3965,26 @@ mod tests {
     fn watch_api_video_fields_are_extractable_for_single_video_enrichment() {
         let payload = serde_json::json!({
             "data": {
-                "response": {
-                    "video": {
-                        "title": "watch title",
-                        "registeredAt": "2026-03-13T20:00:00+09:00",
-                        "description": "line1<br><br>line2",
-                        "count": {
-                            "view": 1715,
-                            "comment": 19,
-                            "mylist": 8,
-                            "like": 25
-                        }
-                    },
-                    "owner": {
-                        "id": 123,
-                        "nickname": "Osakihan"
-                    },
-                    "tag": {
-                        "items": [
-                            { "name": "音楽" },
-                            { "name": "VOCALOID" }
-                        ]
+                "video": {
+                    "title": "watch title",
+                    "registeredAt": "2026-03-13T20:00:00+09:00",
+                    "description": "line1<br><br>line2",
+                    "count": {
+                        "view": 1715,
+                        "comment": 19,
+                        "mylist": 8,
+                        "like": 25
                     }
+                },
+                "owner": {
+                    "id": 123,
+                    "nickname": "Osakihan"
+                },
+                "tag": {
+                    "items": [
+                        { "name": "音楽" },
+                        { "name": "VOCALOID" }
+                    ]
                 }
             }
         });
@@ -3992,10 +4007,8 @@ mod tests {
     fn watch_api_metadata_normalizes_title_entities_once() {
         let payload = serde_json::json!({
             "data": {
-                "response": {
-                    "video": {
-                        "title": "Rock &amp; Roll &amp;amp; Repeat"
-                    }
+                "video": {
+                    "title": "Rock &amp; Roll &amp;amp; Repeat"
                 }
             }
         });
